@@ -1,0 +1,5 @@
+msno,event_date,metric_name,metric_value
+user_001,2017-03-01,total_revenue,149.0
+user_001,2017-03-01,total_secs,46240.281
+user_002,2017-03-01,total_revenue,99.0
+user_002,2017-03-01,total_secs,18200.000

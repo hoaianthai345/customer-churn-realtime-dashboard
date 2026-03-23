@@ -1,0 +1,104 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="KKBox BI Dataflow">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- DATA SOURCES -->
+        <mxCell id="ds" value="DATA SOURCES&#xa;members_v3.csv&#xa;transactions_v2.csv&#xa;user_logs_v2.csv&#xa;train_v2.csv"
+          style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;"
+          vertex="1" parent="1">
+          <mxGeometry x="20" y="200" width="200" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- CLEANING -->
+        <mxCell id="clean" value="BATCH DATA PREP&#xa;clean_*.py&#xa;→ cleaned CSV"
+          style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;"
+          vertex="1" parent="1">
+          <mxGeometry x="260" y="200" width="200" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- PRODUCERS -->
+        <mxCell id="producer" value="PRODUCERS / REPLAY&#xa;bootstrap_members&#xa;replay_transactions&#xa;replay_user_logs&#xa;(1 day = 2 sec)"
+          style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;"
+          vertex="1" parent="1">
+          <mxGeometry x="500" y="200" width="220" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- KAFKA -->
+        <mxCell id="kafka" value="KAFKA&#xa;Topics:&#xa;- member_events&#xa;- transaction_events&#xa;- user_log_events"
+          style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;"
+          vertex="1" parent="1">
+          <mxGeometry x="760" y="200" width="200" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- SPARK -->
+        <mxCell id="spark" value="SPARK STREAMING&#xa;transaction_kpi_job&#xa;activity_kpi_job&#xa;churn_risk_job"
+          style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;"
+          vertex="1" parent="1">
+          <mxGeometry x="1000" y="180" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <!-- CLICKHOUSE -->
+        <mxCell id="clickhouse" value="CLICKHOUSE&#xa;dim_members&#xa;fact_transactions_rt&#xa;fact_user_logs_rt&#xa;kpi_revenue&#xa;kpi_activity&#xa;kpi_churn_risk"
+          style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;"
+          vertex="1" parent="1">
+          <mxGeometry x="1280" y="180" width="240" height="180" as="geometry"/>
+        </mxCell>
+
+        <!-- SUPERSET -->
+        <mxCell id="superset" value="SUPERSET DASHBOARDS&#xa;Revenue&#xa;Activity&#xa;Churn Risk"
+          style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;"
+          vertex="1" parent="1">
+          <mxGeometry x="1560" y="220" width="200" height="120" as="geometry"/>
+        </mxCell>
+
+        <!-- EDGES -->
+        <mxCell id="e1" edge="1" parent="1" source="ds" target="clean"
+          style="strokeColor=#6c8ebf;endArrow=block;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e2" edge="1" parent="1" source="clean" target="producer"
+          style="strokeColor=#6c8ebf;endArrow=block;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e3" edge="1" parent="1" source="producer" target="kafka"
+          style="strokeColor=#f39c12;endArrow=block;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e4" edge="1" parent="1" source="kafka" target="spark"
+          style="strokeColor=#f39c12;endArrow=block;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e5" edge="1" parent="1" source="spark" target="clickhouse"
+          style="strokeColor=#f39c12;endArrow=block;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e6" edge="1" parent="1" source="clickhouse" target="superset"
+          style="strokeColor=#000000;endArrow=block;">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- LEGEND -->
+        <mxCell id="legend1" value="Blue: Batch / Offline"
+          style="text;strokeColor=none;fillColor=none;"
+          vertex="1" parent="1">
+          <mxGeometry x="20" y="400" width="200" height="30" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="legend2" value="Orange: Streaming / Near Realtime"
+          style="text;strokeColor=none;fillColor=none;"
+          vertex="1" parent="1">
+          <mxGeometry x="20" y="430" width="250" height="30" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
