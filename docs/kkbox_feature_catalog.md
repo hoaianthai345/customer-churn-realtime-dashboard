@@ -6,7 +6,7 @@
 
   
 
-Tài liệu này mô tả bộ feature được tạo trong notebook [train_churn_pipeline. Ipynb](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX churn/train_churn_pipeline. Ipynb) sau khi được viết lại theo hướng chỉ dừng ở bước trích xuất feature.
+Tài liệu này mô tả bộ feature được tạo trong notebook https://www.kaggle.com/code/hoianthi/features-prep.
 
   
 
