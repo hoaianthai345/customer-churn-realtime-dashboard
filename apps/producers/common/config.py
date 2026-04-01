@@ -43,6 +43,7 @@ class ProducerSettings:
     topic_user_log_events: str
     replay_sleep_seconds: int
     max_replay_days: Optional[int]
+    replay_start_date: str
     clickhouse_host: str
     clickhouse_port: int
     clickhouse_user: str
@@ -74,6 +75,7 @@ def get_settings() -> ProducerSettings:
         topic_user_log_events=os.getenv("TOPIC_USER_LOG_EVENTS", "user_log_events"),
         replay_sleep_seconds=_env_int("REPLAY_SLEEP_SECONDS", 2),
         max_replay_days=_env_optional_int("MAX_REPLAY_DAYS"),
+        replay_start_date=os.getenv("REPLAY_START_DATE", "2017-03-01").strip() or "2017-03-01",
         clickhouse_host=os.getenv("CLICKHOUSE_HOST", "localhost"),
         clickhouse_port=_env_int("CLICKHOUSE_HTTP_PORT", 8123),
         clickhouse_user=os.getenv("CLICKHOUSE_USER", "default"),

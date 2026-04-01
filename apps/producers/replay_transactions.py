@@ -4,7 +4,12 @@ import time
 
 from apps.producers.common.config import get_settings
 from apps.producers.common.serializers import to_value_bytes, transaction_payload
-from apps.producers.common.utils import build_kafka_producer, group_rows_by_date, read_csv
+from apps.producers.common.utils import (
+    build_kafka_producer,
+    filter_batches_from_start_date,
+    group_rows_by_date,
+    read_csv,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -14,6 +19,7 @@ def main() -> None:
     settings = get_settings()
     rows = read_csv(settings.transactions_clean_path)
     batches = group_rows_by_date(rows, "transaction_date")
+    batches = filter_batches_from_start_date(batches, settings.replay_start_date)
 
     if settings.max_replay_days is not None:
         batches = batches[: settings.max_replay_days]

@@ -6,3 +6,8 @@ data/processed/*.csv
 *.log
 .DS_Store
 *.zip
+diagram.xml
+*.csv
+*.7z
+apps/web_next/node_modules/
+apps/web_next/.next/

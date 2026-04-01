@@ -15,9 +15,9 @@ def run(cmd):
 def main() -> None:
     python_bin = sys.executable
 
-    run([python_bin, "apps/producers/bootstrap_members.py"])
-    run([python_bin, "apps/producers/replay_transactions.py"])
-    run([python_bin, "apps/producers/replay_user_logs.py"])
+    run([python_bin, "-m", "apps.producers.bootstrap_members"])
+    run([python_bin, "-m", "apps.batch.bootstrap_transactions"])
+    run([python_bin, "-m", "apps.producers.replay_user_logs"])
 
     logger.info("All producer jobs finished.")
 

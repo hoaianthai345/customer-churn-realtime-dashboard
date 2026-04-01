@@ -14,7 +14,7 @@ from apps.streaming.common.clickhouse_writer import (
     CLICKHOUSE_USER,
     write_batch_to_clickhouse,
 )
-from apps.streaming.common.schemas import transaction_event_schema
+from apps.streaming.common.schemas import user_log_event_schema
 from apps.streaming.common.spark_session import create_spark_session
 from apps.streaming.common.transforms import parse_kafka_json
 
@@ -22,14 +22,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-def load_activity_snapshot(spark) -> DataFrame:
+def load_transaction_profile(spark) -> DataFrame:
     query = """
       (SELECT
           msno,
-          log_date AS event_date,
-          sum(total_secs) AS total_secs
-       FROM fact_user_logs_rt
-       GROUP BY msno, log_date) activity
+          toFloat64(argMax(is_cancel, transaction_date)) AS is_cancel,
+          toFloat64(argMax(is_auto_renew, transaction_date)) AS is_auto_renew
+       FROM fact_transactions_rt
+       GROUP BY msno) tx_profile
     """
     return (
         spark.read.format("jdbc")
@@ -39,7 +39,6 @@ def load_activity_snapshot(spark) -> DataFrame:
         .option("user", CLICKHOUSE_USER)
         .option("password", CLICKHOUSE_PASSWORD)
         .load()
-        .withColumn("event_date", F.to_date("event_date"))
     )
 
 
@@ -47,7 +46,7 @@ def main() -> None:
     spark = create_spark_session("churn-risk-job")
 
     kafka_servers = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
-    topic = os.getenv("TOPIC_TRANSACTION_EVENTS", "transaction_events")
+    topic = os.getenv("TOPIC_USER_LOG_EVENTS", "user_log_events")
     trigger_interval = os.getenv("SPARK_TRIGGER_INTERVAL", "10 seconds")
     low_activity_threshold = float(os.getenv("LOW_ACTIVITY_THRESHOLD_SECS", "1800"))
     high_risk_threshold = float(os.getenv("CHURN_HIGH_RISK_THRESHOLD", "0.6"))
@@ -60,24 +59,23 @@ def main() -> None:
         .load()
     )
 
-    parsed_df = parse_kafka_json(source_df, transaction_event_schema, value_alias="transaction")
+    parsed_df = parse_kafka_json(source_df, user_log_event_schema, value_alias="user_log")
+    tx_profile_df = load_transaction_profile(spark).cache()
+    _ = tx_profile_df.count()
 
     def write_churn_kpi(batch_df: DataFrame, batch_id: int) -> None:
         if batch_df.rdd.isEmpty():
             return
 
-        tx_features = batch_df.select(
-            "msno",
-            F.col("transaction_date").alias("event_date"),
-            F.col("is_cancel").cast("double").alias("is_cancel"),
-            F.col("is_auto_renew").cast("double").alias("is_auto_renew"),
+        activity_features = (
+            batch_df.groupBy("msno", F.col("date").alias("event_date"))
+            .agg(F.sum(F.col("total_secs")).alias("total_secs"))
+            .select("msno", "event_date", "total_secs")
         )
 
-        activity_snapshot = load_activity_snapshot(spark)
-
         feature_df = (
-            tx_features.join(activity_snapshot, on=["msno", "event_date"], how="left")
-            .fillna({"total_secs": 0.0})
+            activity_features.join(F.broadcast(tx_profile_df), on="msno", how="left")
+            .fillna({"total_secs": 0.0, "is_cancel": 0.0, "is_auto_renew": 1.0})
             .withColumn(
                 "low_activity_flag",
                 F.when(F.col("total_secs") < F.lit(low_activity_threshold), F.lit(1.0)).otherwise(F.lit(0.0)),

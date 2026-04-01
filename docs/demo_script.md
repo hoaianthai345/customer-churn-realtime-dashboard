@@ -15,6 +15,17 @@ docker compose exec clickhouse clickhouse-client --query "SELECT * FROM realtime
 docker compose exec clickhouse clickhouse-client --query "SELECT * FROM realtime_bi.kpi_churn_risk ORDER BY event_date DESC LIMIT 10"
 ```
 
-3. Open Superset at `http://localhost:8088`.
-4. Connect ClickHouse datasource.
-5. Build three dashboards: revenue, activity, churn risk.
+3. Check API quickly:
+
+```bash
+curl http://localhost:8000/health
+curl "http://localhost:8000/api/v1/month-options"
+curl "http://localhost:8000/api/v1/tab1/month-options"
+curl "http://localhost:8000/api/v1/tab1/descriptive?year=2017&month=3&dimension=age"
+curl "http://localhost:8000/api/v1/replay/status"
+```
+
+4. Open dashboard at `http://localhost:3000`.
+5. Use the global slicer (month/year by last_expire_date).
+6. Bấm nút `Replay user logs from 2017-03-01`.
+7. Validate live refresh via WebSocket status badge + Replay status.

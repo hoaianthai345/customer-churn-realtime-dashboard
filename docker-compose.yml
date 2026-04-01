@@ -30,8 +30,9 @@ services:
       KAFKA_LOG_RETENTION_HOURS: ${KAFKA_LOG_RETENTION_HOURS}
 
   clickhouse:
-    image: clickhouse/clickhouse-server:24.8
+    image: clickhouse/clickhouse-server:24.3
     container_name: realtime-bi-clickhouse
+    restart: unless-stopped
     ports:
       - "8123:8123"
       - "9000:9000"
@@ -43,6 +44,12 @@ services:
     volumes:
       - clickhouse_data:/var/lib/clickhouse
       - ./infra/clickhouse/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   spark:
     build:
@@ -50,8 +57,10 @@ services:
       dockerfile: infra/spark/Dockerfile
     container_name: realtime-bi-spark
     depends_on:
-      - kafka
-      - clickhouse
+      kafka:
+        condition: service_started
+      clickhouse:
+        condition: service_healthy
     env_file:
       - .env
     volumes:
@@ -59,24 +68,52 @@ services:
     working_dir: /opt/project
     command: ["/bin/bash", "-c", "tail -f /dev/null"]
 
-  superset:
-    image: apache/superset:latest
-    container_name: realtime-bi-superset
+  api:
+    build:
+      context: .
+      dockerfile: infra/fastapi/Dockerfile
+    container_name: realtime-bi-api
     depends_on:
-      - clickhouse
+      clickhouse:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      spark:
+        condition: service_started
     env_file:
       - .env
     environment:
-      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
-      SUPERSET_ENV: production
-      TZ: ${TZ}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REPLAY_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
-      - "8088:8088"
+      - "8000:8000"
     volumes:
-      - superset_home:/app/superset_home
-      - ./infra/superset:/app/docker
-    command: ["/bin/bash", "-c", "/app/docker/superset-init.sh && /usr/bin/run-server.sh"]
+      - ./:/opt/project
+    working_dir: /opt/project
+    command: ["uvicorn", "apps.api_fastapi.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/next/Dockerfile
+    container_name: realtime-bi-web
+    depends_on:
+      - api
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8000
+    volumes:
+      - ./:/opt/project
+      - web_node_modules:/opt/project/apps/web_next/node_modules
+      - web_next_cache:/opt/project/apps/web_next/.next
+    working_dir: /opt/project/apps/web_next
+    command: ["/bin/sh", "-c", "npm install --no-audit --prefer-offline && mkdir -p .next && find .next -mindepth 1 -exec rm -rf {} + && npm run dev -- --hostname 0.0.0.0 --port 3000"]
 
 volumes:
   clickhouse_data:
-  superset_home:
+  web_node_modules:
+  web_next_cache:

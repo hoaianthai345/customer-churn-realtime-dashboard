@@ -47,7 +47,7 @@ def main() -> None:
         gender = (row.get("gender") or "").strip().lower() or "unknown"
 
         # Rule-based cleanup: replace bd=0 with null.
-        if bd == 0:
+        if bd <= 0:
             bd = None
 
         cleaned_rows.append(

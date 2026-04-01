@@ -1,15 +1,30 @@
 #!/usr/bin/env python3
 import argparse
+import http.client  # noqa: F401
 import logging
+from datetime import date, datetime
+from typing import Optional
 
 import clickhouse_connect
 
 from apps.producers.common.config import get_settings
 from apps.producers.common.serializers import member_payload, to_value_bytes
-from apps.producers.common.utils import build_kafka_producer, read_csv
+from apps.producers.common.utils import read_csv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _parse_member_date(value: str) -> Optional[date]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    for pattern in ("%Y-%m-%d", "%Y%m%d"):
+        try:
+            return datetime.strptime(text, pattern).date()
+        except ValueError:
+            continue
+    return None
 
 
 def bootstrap_to_clickhouse(rows, settings) -> None:
@@ -22,9 +37,14 @@ def bootstrap_to_clickhouse(rows, settings) -> None:
     )
 
     data = []
+    dropped_invalid_date = 0
     for row in rows:
         payload = member_payload(row)
         if not payload["msno"] or not payload["registration_init_time"]:
+            continue
+        registration_init_date = _parse_member_date(payload["registration_init_time"])
+        if registration_init_date is None:
+            dropped_invalid_date += 1
             continue
         data.append(
             [
@@ -33,7 +53,7 @@ def bootstrap_to_clickhouse(rows, settings) -> None:
                 payload["bd"],
                 payload["gender"],
                 payload["registered_via"],
-                payload["registration_init_time"],
+                registration_init_date,
             ]
         )
 
@@ -54,9 +74,13 @@ def bootstrap_to_clickhouse(rows, settings) -> None:
         ],
     )
     logger.info("Inserted %s members into ClickHouse dim_members", len(data))
+    if dropped_invalid_date:
+        logger.warning("Skipped %s member rows with invalid registration_init_time", dropped_invalid_date)
 
 
 def publish_member_events(rows, settings) -> None:
+    from apps.producers.common.utils import build_kafka_producer
+
     producer = build_kafka_producer(settings.kafka_bootstrap_servers)
     sent = 0
     for row in rows:
