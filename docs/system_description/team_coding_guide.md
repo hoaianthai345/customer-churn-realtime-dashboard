@@ -83,7 +83,7 @@ Rule:
 3. Tao job moi trong `apps/streaming/jobs/`.
 4. Tao script run trong `apps/streaming/run/`.
 5. Tao/doi DDL ClickHouse trong `infra/clickhouse/init/`.
-6. Cap nhat `docs/event_contracts.md` + `docs/kpi_definitions.md`.
+6. Cap nhat `docs/architecture_diagrams/event_contracts.md` + `docs/kpi_definitions.md`.
 7. Them test cho schema/transform.
 8. Chay `pytest` truoc khi merge.
 

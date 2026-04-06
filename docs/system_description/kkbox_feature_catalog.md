@@ -2,7 +2,7 @@
 
 ## 1. Muc dich va nguon su that
 
-Tai lieu nay mo ta bo feature duoc tao boi notebook [train_churn_pipeline.ipynb](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX%20churn/train_churn_pipeline.ipynb), da doi chieu voi [train_churn_pipeline_fix_report.md](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX%20churn/train_churn_pipeline_fix_report.md) va canh gioi nghiep vu trong [project_desc.md](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/project-realtime-bi/docs/project_desc.md).
+Tai lieu nay mo ta bo feature duoc tao boi notebook [train_churn_pipeline.ipynb](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX%20churn/train_churn_pipeline.ipynb), da doi chieu voi [train_churn_pipeline_fix_report.md](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX%20churn/train_churn_pipeline_fix_report.md) va canh gioi nghiep vu trong [project_desc.md](/Users/anhoaithai/Documents/AHT/2.%20AREAS/UEH/Ki%CC%80%206/He%CC%A3%CC%82%20ho%CC%82%CC%83%20tro%CC%9B%CC%A3%20qua%CC%89n%20tri%CC%A3%20tho%CC%82ng%20minh/Project/project-realtime-bi/docs/system_description/project_desc.md).
 
 Thu tu uu tien khi co mau thuan:
 

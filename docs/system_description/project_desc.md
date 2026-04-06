@@ -29,8 +29,8 @@ Day la mot he thong near real-time BI cho bai toan churn cua KKBOX, ket hop:
 Nguon su that:
 
 - `README.md`
-- `docs/architecture.md`
-- `docs/tab1_data_strategy.md`
+- `docs/architecture_diagrams/architecture.md`
+- `docs/system_description/tab1_data_strategy.md`
 
 Nhung file nay quy dinh:
 
@@ -43,7 +43,7 @@ Nhung file nay quy dinh:
 
 Nguon su that:
 
-- `docs/kkbox_feature_catalog.md`
+- `docs/system_description/kkbox_feature_catalog.md`
 - `../infiniteWing/KKBOX churn/train_churn_pipeline.ipynb`
 - `../infiniteWing/KKBOX churn/train_churn_pipeline_fix_report.md`
 
@@ -58,7 +58,7 @@ Nhung file nay quy dinh:
 
 Nguon su that:
 
-- file nay `docs/project_desc.md`
+- file nay `docs/system_description/project_desc.md`
 
 File nay quy dinh:
 
@@ -179,8 +179,8 @@ Noi dung chinh:
 
 Tai lieu lien quan:
 
-- `docs/tab1_data_strategy.md`
-- `docs/kkbox_feature_catalog.md`
+- `docs/system_description/tab1_data_strategy.md`
+- `docs/system_description/kkbox_feature_catalog.md`
 
 ### 7.3. Tab 2: Predictive Analysis
 
@@ -286,10 +286,10 @@ Nhung implementation hien tai moi chac chan o muc:
 
 ## 10. Nguyen tac lam viec cho agent sau
 
-1. Neu thay doi stack runtime, cap nhat `README.md` va `docs/architecture.md`.
-2. Neu thay doi snapshot logic, cleaning rule, feature names, segment threshold batch, cap nhat `docs/kkbox_feature_catalog.md` va notebook lien quan.
-3. Neu thay doi product scope, cap nhat file nay `docs/project_desc.md`.
-4. Neu thay doi Tab 1 serving logic, cap nhat `docs/tab1_data_strategy.md`.
+1. Neu thay doi stack runtime, cap nhat `README.md` va `docs/architecture_diagrams/architecture.md`.
+2. Neu thay doi snapshot logic, cleaning rule, feature names, segment threshold batch, cap nhat `docs/system_description/kkbox_feature_catalog.md` va notebook lien quan.
+3. Neu thay doi product scope, cap nhat file nay `docs/system_description/project_desc.md`.
+4. Neu thay doi Tab 1 serving logic, cap nhat `docs/system_description/tab1_data_strategy.md`.
 5. Khong tai sinh docs Superset / implementation prompt cu lam nguon su that moi.
 6. Khong goi cac metric proxy la ML output that neu chua co pipeline train + serving tuong ung.
 7. Khi thay doi segment threshold, uu tien dong bo ca:
@@ -301,9 +301,10 @@ Nhung implementation hien tai moi chac chan o muc:
 ## 11. File va thu muc quan trong
 
 - `README.md`: cach chay va service endpoints
-- `docs/architecture.md`: end-to-end runtime architecture
-- `docs/tab1_data_strategy.md`: Tab 1 serving design
-- `docs/kkbox_feature_catalog.md`: feature semantics tu notebook batch
+- `docs/architecture_diagrams/architecture.md`: end-to-end runtime architecture
+- `docs/system_description/tab1_data_strategy.md`: Tab 1 serving design
+- `docs/system_description/kkbox_feature_catalog.md`: feature semantics tu notebook batch
+- `docs/report_and_slides/kkbox_report_diagrams.md`: inventory diagram cho bao cao va slide
 - `apps/api_fastapi/main.py`: API va logic proxy cho Tab 2 / Tab 3
 - `apps/batch/materialize_tab1_realtime.py`: realtime Tab 1 materialization
 - `apps/web_next/app/page.tsx`: UI dashboard canonical
