@@ -1,120 +1,320 @@
-Tên dự án: KKBox Churn Intelligence Dashboard (K-CID)
-Đối tượng đọc: C-Level (CEO, CFO), Giám đốc Marketing (CMO), Giám đốc Sản phẩm (CPO), Đội ngũ Data (DE, DS, DA).
+# KKBOX Churn Intelligence Dashboard
 
-TỔNG QUAN DỰ ÁN (EXECUTIVE SUMMARY)
-1.1. Mục tiêu kinh doanh (Business Objectives)
-KKBox đang đối mặt với bài toán tối ưu hóa vòng đời khách hàng (Customer Lifetime Value - LTV). Hệ thống K-CID được xây dựng nhằm:
-Minh bạch hóa dữ liệu: Chuyển đổi hàng trăm triệu dòng log thô (18M+ rows) thành các chỉ số hành vi có ý nghĩa quản trị.
-Dự báo chủ động: Nhận diện sớm tập khách hàng có nguy cơ Rời bỏ (Churn) trong 30 ngày tới.
-Hỗ trợ quyết định (Prescriptive): Cung cấp công cụ giả lập (Simulation) để đo lường ROI của các chiến dịch Marketing/Product trước khi thực thi.
-1.2. Chân dung người dùng (User Personas)
-CMO / Trưởng phòng Marketing: Cần biết ai sắp rời đi để tung khuyến mãi (win-back campaign), đánh giá xem nên dồn ngân sách vào tệp người dùng nào (Ví dụ: Tập trung chốt Auto-renew).
-CPO / Trưởng phòng Sản phẩm: Cần xem các chỉ số tương tác âm nhạc (skip_ratio, discovery_ratio) để tinh chỉnh thuật toán gợi ý (Recommendation Engine) tránh hiện tượng "nhàm chán nội dung".
-CFO / Trưởng phòng Tài chính: Quan tâm đến dòng tiền (Revenue at Risk) và sự ổn định của LTV.
+## 1. Muc dich cua tai lieu
 
+Tai lieu nay la file context tong hop cho nhung agent va contributor xu ly repo nay ve sau.
 
-Ứng dụng BI sẽ có 1 Thanh Filter toàn cục (Global Slicer) và 3 Tabs chức năng chính.
+Muc tieu:
 
-Global Slicer (Bộ lọc áp dụng cho toàn hệ thống)
-Time Context: Lọc theo tháng/năm của last_expire_date (Ví dụ: Chỉ xem tập khách hàng sẽ hết hạn gói cước vào Tháng 3/2017).
-TAB 1: DESCRIPTIVE ANALYSIS (TỔNG QUAN HIỆN TRẠNG & HÀNH VI)
-Mục đích: Trả lời câu hỏi "Chuyện gì đang xảy ra với vòng đời khách hàng?"
-1. Khối High-Level KPIs (Thẻ chỉ số nằm ngang ở trên cùng):
-Total Expiring Users: Tổng số user sẽ hết hạn trong kỳ lọc.
-Historical Churn Rate: Tỷ lệ rời bỏ thực tế (%).
-Overall Median Survival: Thời gian sống sót trung vị tổng thể (Ví dụ: ~365 ngày).
-Auto-Renew Rate: Tỷ lệ bật Tự động gia hạn (%).
-2. Khối Visualizations:
-Biểu đồ 1: Dynamic Kaplan-Meier Survival Curve (Line Chart)
-Mô tả: Biểu đồ đường cong sinh tồn.
-Tương tác: Có một Dropdown list (Menu thả xuống) ngay trên góc biểu đồ để chọn Dimension (Chiều phân tích):[Độ tuổi | Giới tính/Hồ sơ | Tần suất giao dịch | Sự chán nản (Skip Ratio)]. Khi chọn chiều nào, biểu đồ tự động tách thành các đường tương ứng (như code đã vẽ).
-Biểu đồ 2: Phân rổ Khách hàng (100% Stacked Bar Chart)
-Mô tả: Trục Y là các phân khúc được Rời rạc hóa (Binning) từ code: price_segment, loyalty_segment, active_segment. Trục X là Tỷ lệ % (Màu Đỏ = Churn, Màu Xanh = Retain).
-Tương tác (Cross-filtering): Khi User click vào thanh "Săn deal < 4.5đ", toàn bộ Tab 1 sẽ hiển thị dữ liệu riêng của nhóm săn deal này.
-Biểu đồ 3: Ma trận Hành vi "Nhàm chán nội dung" (Scatter Plot)
-Cơ sở: Thể hiện insight "Hiệu ứng giao cắt" của teammate.
-Trục X: discovery_ratio (Tỷ lệ khám phá).
-Trục Y: skip_ratio (Tỷ lệ chuyển bài).
-Trực quan: Các bong bóng là các User/Nhóm User. Bong bóng màu đỏ sậm (Churn cao) sẽ tập trung ở góc "Khám phá thấp + Skip cao".
+- Giu duoc boi canh kinh doanh va pham vi san pham.
+- Xac dinh ro stack canonical, luong du lieu va file nguon su that.
+- Tach bach phan da implement, phan dang la proxy, va phan con la backlog.
+- Giam viec tai sinh tai lieu cu khong con dong bo.
 
-TAB 2: PREDICTIVE ANALYSIS (DỰ BÁO RỦI RO & THỜI GIAN SỐNG SÓT)
-Requirement: CẦN CÓ CÁC MÔ HÌNH SAU (để add vào tab Data Pipeline luôn)
-Mô hình Classification (XGBoost/LightGBM): Dự báo Xác suất Rời bỏ trong 30 ngày tới (Probability of Churn: 0% - 100%). Thay vì điểm rủi ro chung chung, đây là xác suất tuyệt đối.
-Mô hình Regression/Lifetimes (BG/NBD + Gamma-Gamma): Dự báo Giá trị Vòng đời Khách hàng tương lai (Predicted Future CLTV). Tính toán xem trong 6-12 tháng tới, một user/segment sẽ mang về bao nhiêu doanh thu (NTD).
-Mô hình Cox Proportional Hazards (Đã có): Dùng để tính toán sức ảnh hưởng của các biến (Feature Importance/Hazard Ratio).
-Mục tiêu nghiệp vụ: Cung cấp bức tranh dự phóng về Doanh thu và Tỷ lệ giữ chân trong 30-90 ngày tới. Phân loại CSDL thành các nhóm chiến lược để C-Level quyết định phân bổ ngân sách Retention.
-1. Khối Dự phóng Tài chính & KPI (Predictive KPIs)
-Không hiển thị số liệu hiện tại, chỉ hiển thị số liệu DỰ BÁO của tương lai.
-Forecasted 30-Day Churn Rate: Tỷ lệ rời bỏ dự kiến trong tháng tới (Ví dụ: 5.2%). Có mũi tên đỏ/xanh biểu thị xu hướng so với tháng hiện tại.
-Predicted Revenue at Risk (NTD): Tổng dòng tiền dự kiến thất thoát.
-Công thức: ∑ (Xác suất Churn của User × Phí gia hạn dự kiến).
-Total Predicted Future CLTV: Tổng giá trị vòng đời tương lai của tập khách hàng có xác suất ở lại > 50%. (Định giá sức khỏe của CSDL hiện tại).
-Top Flight-Risk Segment: Gọi tên phân khúc đang có nguy cơ rụng cao nhất kèm số tiền rủi ro (Ví dụ: Sinh viên / Manual Pay / Deal-hunter - Risk: 15.2M NTD).
+Neu co mau thuan giua cac tai lieu, hay xu ly theo dung pham vi cua tung tai lieu thay vi co gang bat mot file giai quyet tat ca.
 
-2. Khối Visualizations (Biểu đồ phân tích Cấp quản trị)
-Biểu đồ 1: Ma trận Giá trị vs. Rủi ro (Value vs. Risk Scatter Quadrant)
-Mục đích: Công cụ cốt lõi để C-Level quyết định "Nên cứu ai, bỏ ai?".
-Trục X: Predicted Future CLTV (Từ Thấp đến Cao).
-Trục Y: Churn Probability % (Từ 0% đến 100%).
-Trực quan hóa: Mỗi điểm (Bubble) trên biểu đồ đại diện cho một Phân khúc khách hàng (Segment) chứ không phải từng cá nhân (Bubble size = Số lượng User). Biểu đồ được chia làm 4 góc phần tư:
-Góc trên - Phải (High Value, High Risk): Must Save (Phải giữ bằng mọi giá). Đây là nhóm VIP đang có dấu hiệu bỏ đi.
-Góc trên - Trái (Low Value, High Risk): Let Go (Cho đi luôn). Nhóm săn deal, đóng tiền ít nhưng nguy cơ rụng cực cao. Đổ tiền marketing vào đây là lỗ.
-Góc dưới - Phải (High Value, Low Risk): Loyal Core (Lõi trung thành). Nhóm tự động gia hạn, sinh lời ổn định.
-Góc dưới - Trái (Low Value, Low Risk): Stable Low-Tier.
-Biểu đồ 2: Phân bổ Thất thoát Doanh thu theo Yếu tố (Predicted Revenue Leakage Treemap)
-Mục đích: Trả lời câu hỏi "Dòng tiền Revenue at Risk đang bị chảy ra từ những lỗ hổng nào của sản phẩm/chính sách?".
-Trực quan hóa: Biểu đồ Treemap (Hình chữ nhật chia khối). Kích thước của mỗi khối vuông tỷ lệ thuận với số tiền Revenue at Risk.
-Chiều phân tích (Dimension): Khối to nhất sẽ nhóm theo các biến trọng yếu nhất phát hiện từ mô hình Cox. Ví dụ:
-Khối 1 (Chiếm 60% diện tích): Nhóm thanh toán Thủ công (Manual Renewal).
-Khối 2 (Chiếm 25% diện tích): Nhóm có Tỷ lệ Skip bài > 50% (Chán nản thuật toán).
-Khối 3 (Chiếm 15% diện tích): Nhóm độ tuổi 15-20.
-Tương tác: Click vào một khối (Ví dụ khối "Skip > 50%") để xem chi tiết nhóm này cấu thành từ những ai.
-Biểu đồ 3: Đường cong Rớt phễu Dự phóng (Forecasted Survival Decay Line Chart)
-Mục đích: Thay vì nhìn Kaplan-Meier của quá khứ (Tab 1), C-Level nhìn thấy viễn cảnh tương lai. Nếu không làm gì cả, lượng user Active hiện tại sẽ rụng như thế nào trong 3-6-12 tháng tới?
-Trực quan hóa:
-Trục X: Timeline các tháng trong tương lai (T+1, T+2... T+12).
-Trục Y: % Số lượng User dự kiến còn giữ lại được.
-Vẽ 3 đường line đại diện cho 3 nhóm: Tệp trả giá chuẩn, Tệp săn deal, và Tệp Free Trial. Biểu đồ sẽ cho CEO thấy rõ: Tệp Free Trial rớt thẳng đứng về 0 sau tháng T+1, trong khi tệp giá chuẩn duy trì độ lài ổn định.
-Biểu đồ phễu
-3. Khối Actionable Insights (Tự động hóa báo cáo)
-Thay vì để một bảng Data Table thô liệt kê từng user, BI tool sẽ tổng hợp thành một bảng Strategic Prescriptions (Khuyến nghị cấp phân khúc):
-Cấu trúc Bảng:
-Segment Name (Ví dụ: VIP - Manual Pay - Low Discovery).
-User Count (Số lượng User).
-Average Churn Prob (Xác suất rụng trung bình).
-Revenue at Risk (Tiền rủi ro).
-Primary Risk Driver (Nguyên nhân chính đẩy xác suất rụng lên cao - dựa trên SHAP values của XGBoost hoặc Hazard Ratio của Cox).
-Chức năng Export: Dành cho CMO/Data Team tải cục Segment này về để map vào hệ thống CRM chạy chiến dịch.
+## 2. Du an trong 1 cau
 
-TAB 3: PRESCRIPTIVE SIMULATION (MÔ PHỎNG & TỐI ƯU HÓA HÀNH ĐỘNG)
-Mục tiêu nghiệp vụ: Cho phép C-Level điều chỉnh các tham số giả định (Giảm tỷ lệ User có thói quen xấu, tăng tỷ lệ thanh toán tự động) để đo lường mức độ tác động đến Doanh thu và Hệ số rủi ro tổng thể.
-Làm rõ định nghĩa: "Rủi ro" ở đây được định lượng chính xác là Hazard Ratio (HR). Giả lập ở đây là bài toán tính toán lại HR trung bình của toàn hệ thống khi phân bổ lại cấu trúc tệp khách hàng.
-1. Khối Control Panel (Tham số đầu vào - Input Parameters):
-Người dùng tương tác bằng các thanh trượt (Sliders) để thiết lập kịch bản giả định (Scenario):
-Tác động Thương mại (Commercial):
-Slider 1: Chuyển đổi [ X ] % lượng User từ Pay_Manual sang Pay_Auto-Renew.
-Slider 2: Chuyển đổi [ Y ] % lượng User đang dùng gói Trial/Deal (<4.5đ/ngày) sang gói Giá chuẩn (>=4.5đ).
-Tác động Sản phẩm (Product Engagement):
-Slider 3: Chuyển đổi [ Z ] % lượng User có hành vi Skip_High (>50%) (Chán nản) xuống mốc Skip_Low (<20%) (Hài lòng).
-2. Khối Visualizations (Kết quả đầu ra - Output Metrics):
-Biểu đồ 1: Population Hazard Shift (Overlaid Histogram / Mật độ phân bổ rủi ro)
-Định nghĩa lại: Trục X là điểm Hazard Ratio (HR). Trục Y là % lượng User.
-Trực quan hóa: Biểu đồ thể hiện 2 đường cong mật độ (Density curve). Đường màu xám là Hiện trạng (Baseline). Khi kéo thanh trượt (Ví dụ tăng Auto-renew), hệ thống tính toán lại HR mới cho tệp User được chuyển đổi. Đường màu xanh (Scenario) sẽ xuất hiện và dịch chuyển về phía bên trái (phía có HR thấp hơn).
-Ý nghĩa nghiệp vụ: Cung cấp bằng chứng trực quan về việc kịch bản giả định làm giảm thiểu mức độ rủi ro chung của toàn bộ CSDL như thế nào.
-Biểu đồ 2: Financial Impact Analysis (Waterfall Chart)
-Bổ sung tính toán:
-Cột 1: Current Baseline Revenue (Doanh thu của kỳ hiện tại).
-Cột 2: Saved Revenue from Retention (Doanh thu giữ lại được nhờ việc dịch chuyển HR xuống mức an toàn, kéo dài số ngày sống sót dự kiến × giá trị gói cước ngày).
-Cột 3: Incremental Revenue from Upsell (Doanh thu tăng thêm từ việc ép User mua gói Giá chuẩn - từ Slider 2).
-Cột 4: Optimized Projected Revenue (Tổng doanh thu kỳ vọng sau kịch bản).
-Biểu đồ 3: Sensitivity Analysis - ROI per Strategy (Tornado/Bar Chart)
-Bổ sung phân tích: Trong các thanh trượt vừa kéo, hành động nào mang lại hiệu quả cao nhất?
-Trực quan hóa: Trục Y liệt kê 3 chiến lược (Auto-Renew, Upsell Giá chuẩn, Giảm Skip Ratio). Trục X hiển thị chỉ số Revenue Impact per 1% Shift (Cứ 1% User được chuyển đổi thành công ở mỗi mục thì mang lại bao nhiêu tiền).
-Ý nghĩa nghiệp vụ: Trả lời trực tiếp câu hỏi nguồn lực của Ban Giám đốc: Nên dồn ngân sách cho Marketing để chốt Auto-Renew hay dồn cho IT/Product để tinh chỉnh thuật toán gợi ý bài hát nhằm giảm Skip Ratio? (Dữ liệu mô hình Cox cho thấy Pay_Auto-Renew làm giảm rủi ro 37.3%, đây sẽ là chiến lược có độ nhạy cao nhất).
+Day la mot he thong near real-time BI cho bai toan churn cua KKBOX, ket hop:
 
-Extract: Trích xuất định kỳ từ 4 bảng members, transactions, user_logs, train (khóa chính msno).
-Transform:
-Data Cleaning: Giới hạn tuổi 15-65, chặn các log thời gian > 86,400 giây/ngày, xử lý lỗi logic ngày hết hạn < ngày thanh toán.
-Feature Engineering & Aggregation: Tính toán quy tắc RFM (Recency, Frequency, Monetary). Rời rạc hóa (Binning) các biến liên tục thành các tệp khách hàng: Loyalty_segment, Price_segment, Skip_segment (Thấp/TB/Cao), Discovery_segment (Thói quen/Cân bằng/Khám phá).
-Modeling Scoring: Chạy mô hình phân tích sinh tồn Cox Proportional Hazards để chấm điểm Risk Score cho từng User.
-Load: Đẩy dữ liệu đã được tổng hợp (Aggregated Master Table) vào Data Warehouse (VD: BigQuery, Snowflake) để kết nối trực tiếp với ứng dụng.
+- offline feature engineering tren du lieu goc KKBOX;
+- replay streaming cho `user_logs`;
+- Spark + ClickHouse cho serving layer;
+- FastAPI + Next.js cho dashboard.
+
+## 3. Nguon su that va thu tu uu tien
+
+### 3.1. Runtime va kien truc he thong
+
+Nguon su that:
+
+- `README.md`
+- `docs/architecture.md`
+- `docs/tab1_data_strategy.md`
+
+Nhung file nay quy dinh:
+
+- stack canonical;
+- cach chay pipeline;
+- bang serving va API hien tai;
+- pham vi realtime cua Tab 1.
+
+### 3.2. Feature semantics va snapshot logic
+
+Nguon su that:
+
+- `docs/kkbox_feature_catalog.md`
+- `../infiniteWing/KKBOX churn/train_churn_pipeline.ipynb`
+- `../infiniteWing/KKBOX churn/train_churn_pipeline_fix_report.md`
+
+Nhung file nay quy dinh:
+
+- grain cua feature store batch;
+- logic label churn;
+- cleaning rules;
+- cac feature va threshold semantic cua batch pipeline.
+
+### 3.3. Product scope va context chung
+
+Nguon su that:
+
+- file nay `docs/project_desc.md`
+
+File nay quy dinh:
+
+- muc tieu kinh doanh;
+- pham vi tab san pham;
+- phan nao da co, phan nao chi la proxy, phan nao chua lam;
+- nhung conflict can duoc xu ly khi lam tiep.
+
+## 4. Kien truc canonical hien tai
+
+Stack canonical cua repo:
+
+- Kafka
+- Spark Structured Streaming
+- ClickHouse
+- FastAPI
+- Next.js
+
+Luong xu ly tong quat:
+
+`Batch preload (members + transactions) -> replay user logs -> Kafka -> Spark -> ClickHouse -> FastAPI -> Next.js`
+
+Luu y quan trong:
+
+- Khong xem Superset la stack canonical nua.
+- Cac docs prompt/implementation cu theo huong Superset da bi loai bo.
+- `apps/dashboard_streamlit/` co the van ton tai nhu mot prototype hoac nhanh cu, nhung khong phai duong san pham chinh.
+
+## 5. Hai lop du lieu can phan biet ro
+
+Repo va project hien tai co 2 lop du lieu lien quan nhau nhung khong dong nhat:
+
+### 5.1. Lop offline feature store
+
+Nguon:
+
+- notebook `train_churn_pipeline.ipynb` nam o thu muc song song voi repo.
+
+Muc dich:
+
+- tao snapshot feature theo thang;
+- aggregate `user_logs` cua thang truoc;
+- enrich `members`;
+- tao feature numeric va semantic cho modeling va BI.
+
+Dau ra:
+
+- `train_features_all.parquet`
+- `test_features_201704_full.parquet`
+- `bi_feature_master.parquet`
+- `train_features_bi_all.parquet`
+- `test_features_bi_201704_full.parquet`
+- `feature_columns.csv`
+- `bi_dimension_columns.csv`
+
+### 5.2. Lop realtime serving
+
+Nguon:
+
+- batch preload `members` + `transactions`;
+- replay `user_logs` vao Kafka;
+- Spark viet fact va KPI vao ClickHouse;
+- batch materializer tao bang Tab 1 realtime.
+
+Bang serving quan trong:
+
+- `realtime_bi.tab1_descriptive_member_monthly`
+
+Muc dich:
+
+- phuc vu dashboard Tab 1 voi do tre thap;
+- tach `history_precompute` va `realtime_2017_plus`.
+
+## 6. Muc tieu kinh doanh
+
+He thong nay giai quyet 3 nhom cau hoi:
+
+1. Minh bach hoa hanh vi va vong doi khach hang tu du lieu raw.
+2. Phat hien som tap user co nguy co churn.
+3. Ho tro quyet dinh retention va product tuning bang phan tich va simulation.
+
+Nguoi dung muc tieu:
+
+- CMO / Marketing lead
+- CPO / Product lead
+- CFO / Finance lead
+- Nhom Data: DE, DS, DA
+
+## 7. Pham vi san pham canonical
+
+Ung dung co 1 global time context va 3 tab chinh.
+
+### 7.1. Global slicer
+
+Muc dich:
+
+- loc theo thang cohort het han / snapshot month.
+
+Luu y ve semantics:
+
+- trong offline feature store, context nay gan voi `target_month` va `last_expire_month`;
+- trong serving layer Tab 1, context nay gan voi `snapshot_month` va `last_expire_date`.
+
+### 7.2. Tab 1: Descriptive Analysis
+
+Day la phan grounded nhat va gan voi implementation hien tai nhat.
+
+Muc tieu:
+
+- tra loi "chuyen gi dang xay ra voi vong doi khach hang?"
+
+Noi dung chinh:
+
+- KPI: total expiring users, historical churn rate, median survival, auto-renew rate
+- Kaplan-Meier theo dimension
+- 100% stacked bar theo segment
+- boredom scatter theo `discovery_ratio` va `skip_ratio`
+
+Tai lieu lien quan:
+
+- `docs/tab1_data_strategy.md`
+- `docs/kkbox_feature_catalog.md`
+
+### 7.3. Tab 2: Predictive Analysis
+
+Muc tieu san pham:
+
+- du bao churn probability;
+- tinh revenue at risk;
+- uoc tinh future CLTV;
+- nhin segment risk/value cho cap quan tri.
+
+Trang thai hien tai:
+
+- feature input layer da co trong offline feature store;
+- API hien tai co scoring va tong hop predictive theo cong thuc proxy;
+- chua co bang chung rang day la output tu mo hinh train chinh thuc.
+
+Do do:
+
+- khong duoc mo ta `churn_probability`, `predicted_future_cltv`, `hazard_ratio` la model output thuc su neu chua thay implementation train/serving ro rang;
+- hien tai can xem Tab 2 la product surface co mot phan proxy analytics.
+
+### 7.4. Tab 3: Prescriptive Simulation
+
+Muc tieu san pham:
+
+- cho phep dieu chinh scenario nhu manual -> auto-renew, deal -> standard, high skip -> lower skip;
+- uoc tinh tac dong tai chinh va tac dong risk profile.
+
+Trang thai hien tai:
+
+- feature flags va segment can thiet da co trong feature store;
+- API hien tai co scenario simulation va hazard histogram theo cong thuc proxy;
+- chua co mo hinh Cox chinh thuc noi vao simulation.
+
+Vi vay:
+
+- Tab 3 hien la simulation huong san pham;
+- chua duoc xem la decision engine da hieu chuan.
+
+## 8. Trang thai implementation hien tai
+
+### 8.1. Da grounded va nen uu tien giu dong bo
+
+- runtime stack Kafka + Spark + ClickHouse + FastAPI + Next.js
+- luong replay `user_logs`
+- Tab 1 serving table va API
+- offline feature catalog tu notebook batch
+- cleaning rules, snapshot semantics, segment semantic cua batch notebook
+
+### 8.2. Da co nhung can gan nhan "proxy" thay vi "model that"
+
+- predictive scoring trong `apps/api_fastapi/main.py`
+- future CLTV tinh theo cong thuc heuristic
+- `hazard_ratio_proxy`
+- scenario simulation cho Tab 3
+
+### 8.3. Chua canonical hoac chua hoan tat
+
+- classification model train/serve chinh thuc
+- CLTV model chinh thuc
+- Cox model chinh thuc
+- SHAP / primary risk driver tu model that
+- mot dinh nghia duy nhat cho "transaction frequency"
+- dong bo threshold segment giua offline batch va realtime serving
+
+## 9. Conflict dang mo can agent sau luon kiem tra
+
+### 9.1. Transaction frequency chua co dinh nghia canonical
+
+Product muon co dimension "transaction frequency" cho Kaplan-Meier.
+
+Nhung hien tai:
+
+- batch notebook chua tao `txn_freq_bucket` canonical;
+- realtime Tab 1 co `txn_freq_bucket` rieng trong serving layer;
+- `active_segment` cua batch lai la listening activity, khong phai transaction frequency.
+
+Bat ky ai lam tiep Tab 1 deu phai chot lai dinh nghia nay truoc khi mo rong.
+
+### 9.2. Threshold segment batch va realtime dang lech nhau
+
+Vi du:
+
+- `age`
+- `price_segment`
+- `loyalty_segment`
+- `active_segment`
+
+Batch notebook va realtime materializer dang bucket hoa khac nhau. Neu khong dong bo, cung mot ten chart co the tra ve 2 nghia khac nhau.
+
+### 9.3. Product brief va implementation dang khac nhau o muc model maturity
+
+Product brief co the mo ta nhu da co:
+
+- classification
+- CLTV
+- Cox / hazard ratio
+
+Nhung implementation hien tai moi chac chan o muc:
+
+- feature store input;
+- heuristic scoring / proxy dashboard logic.
+
+## 10. Nguyen tac lam viec cho agent sau
+
+1. Neu thay doi stack runtime, cap nhat `README.md` va `docs/architecture.md`.
+2. Neu thay doi snapshot logic, cleaning rule, feature names, segment threshold batch, cap nhat `docs/kkbox_feature_catalog.md` va notebook lien quan.
+3. Neu thay doi product scope, cap nhat file nay `docs/project_desc.md`.
+4. Neu thay doi Tab 1 serving logic, cap nhat `docs/tab1_data_strategy.md`.
+5. Khong tai sinh docs Superset / implementation prompt cu lam nguon su that moi.
+6. Khong goi cac metric proxy la ML output that neu chua co pipeline train + serving tuong ung.
+7. Khi thay doi segment threshold, uu tien dong bo ca:
+   - batch feature store
+   - realtime materializer
+   - API / UI labels
+8. Neu gap mau thuan nghiep vu, ghi ro conflict thay vi tu y chon mot nghia moi ma khong danh dau.
+
+## 11. File va thu muc quan trong
+
+- `README.md`: cach chay va service endpoints
+- `docs/architecture.md`: end-to-end runtime architecture
+- `docs/tab1_data_strategy.md`: Tab 1 serving design
+- `docs/kkbox_feature_catalog.md`: feature semantics tu notebook batch
+- `apps/api_fastapi/main.py`: API va logic proxy cho Tab 2 / Tab 3
+- `apps/batch/materialize_tab1_realtime.py`: realtime Tab 1 materialization
+- `apps/web_next/app/page.tsx`: UI dashboard canonical
+- `../infiniteWing/KKBOX churn/train_churn_pipeline.ipynb`: offline batch feature engineering notebook
+- `../infiniteWing/KKBOX churn/train_churn_pipeline_fix_report.md`: ghi chu cac fix nghiep vu va data-quality
+
+## 12. Tuyen bo cuoi cung ve pham vi hien tai
+
+Can hieu du an nay nhu sau:
+
+- Day la mot dashboard churn intelligence co nen tang realtime BI that.
+- Tab 1 la phan on dinh va ro nghia nhat hien nay.
+- Tab 2 va Tab 3 la huong san pham dung, nhung implementation hien tai van co thanh phan proxy.
+- Offline feature store va realtime serving can duoc tiep tuc dong bo de tranh "cung ten metric, khac nghia du lieu".

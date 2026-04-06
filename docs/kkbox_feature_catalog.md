@@ -1,518 +1,477 @@
 # KKBOX Feature Catalog
 
-  
+## 1. Muc dich va nguon su that
 
-## 1. Phạm vi
+Tai lieu nay mo ta bo feature duoc tao boi notebook [train_churn_pipeline.ipynb](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX%20churn/train_churn_pipeline.ipynb), da doi chieu voi [train_churn_pipeline_fix_report.md](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/infiniteWing/KKBOX%20churn/train_churn_pipeline_fix_report.md) va canh gioi nghiep vu trong [project_desc.md](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/project-realtime-bi/docs/project_desc.md).
 
-  
+Thu tu uu tien khi co mau thuan:
 
-Tài liệu này mô tả bộ feature được tạo trong notebook https://www.kaggle.com/code/hoianthi/features-prep.
+1. Notebook + fix report la nguon su that cho logic feature store batch.
+2. `project_desc.md` la nguon su that cho muc tieu san pham va UI.
+3. Cac tai lieu khac chi co gia tri tham khao neu khong mau thuan voi hai nguon tren.
 
-  
+Tai lieu nay chi mo ta:
 
-Notebook tập trung vào:
+- Grain va semantics cua snapshot feature.
+- Quy tac lam sach va tinh toan feature da co trong pipeline.
+- Cach nhom feature phuc vu Tab 1, Tab 2, Tab 3.
+- Nhung khoang trong va xung dot nghiep vu can chot.
 
-  
+Tai lieu nay khong mac dinh rang cac mo hinh du bao da ton tai chi vi `project_desc.md` neu yeu cau. Neu notebook chua tao ra mot cot, cot do duoc xem la chua co trong feature store batch hien tai.
 
-- Tạo snapshot churn theo tháng
+## 2. Dau ra cua pipeline
 
-- Aggregate `user_logs` của tháng trước
+Notebook tao cac artifact sau trong `artifacts/feature_store/`:
 
-- Merge thông tin `members`
+- `train_features_all.parquet`: tap train numeric cho modeling.
+- `test_features_201704_full.parquet`: tap score numeric cho snapshot `201704`.
+- `bi_feature_master.parquet`: bang master BI gom cac snapshot `201701` den `201704`.
+- `train_features_bi_all.parquet`: tap train da duoc enrich them dimension semantic cho BI.
+- `test_features_bi_201704_full.parquet`: tap test da enrich them dimension semantic cho BI.
+- `feature_columns.csv`: danh sach cot numeric cho modeling.
+- `bi_dimension_columns.csv`: danh sach dimension semantic uu tien cho dashboard.
 
-- Tạo feature số cho modeling
+## 3. Grain, snapshot va label
 
-- Tạo feature semantic cho dashboard BI theo mô tả trong [project_desc. Md](/Users/anhoaithai/Documents/AHT/2. AREAS/UEH/Kì 6/Hệ hỗ trợ quản trị thông minh/Project/project-realtime-bi/docs/project_desc. Md)
+### 3.1. Grain co ban
 
-  
+Grain cua feature store la `1 dong / 1 msno / 1 target_month`.
 
-## 2. Đầu ra của notebook
+Moi dong la mot snapshot trang thai cua mot user tai thoi diem quan sat lien quan den mot ky sap het han, khong phai toan bo lich su cua user.
 
-  
+### 3.2. Cach chon anchor transaction
 
-- `artifacts/feature_store/train_features_all.parquet`: tập train numeric, giữ định dạng để model đọc trực tiếp
+Voi moi `target_month`, pipeline:
 
-- `artifacts/feature_store/test_features_201704_full.parquet`: tập score numeric cho tháng `201704`
+1. Lay lich su giao dich cua user truoc thang do.
+2. Chon giao dich hop le cuoi cung trong lich su bang logic pha tie theo ngay giao dich, gia, do dai goi, payment method va cancel.
+3. Chi giu giao dich neu `expire_month == target_month`.
+4. Dung giao dich nay lam anchor de tao snapshot.
 
-- `artifacts/feature_store/bi_feature_master.parquet`: bảng master cho BI, gồm snapshot `201701` đến `201704`
+### 3.3. Dinh nghia label churn
 
-- `artifacts/feature_store/train_features_bi_all.parquet`: tập train có thêm các cột semantic cho BI
+`is_churn` duoc gan bang cach nhin 30 ngay sau `expire_date` cua anchor transaction:
 
-- `artifacts/feature_store/test_features_bi_201704_full.parquet`: tập score có thêm các cột semantic cho BI
+- `is_churn = 0` neu user co giao dich gia han hop le trong vong duoi `30` ngay, bao gom ca truong hop gia han som truoc `expire_date` nen `gap` am.
+- `is_churn = 1` neu khong co giao dich gia han, hoac khoang cach gia han `>= 30` ngay.
 
-- `artifacts/feature_store/feature_columns.csv`: danh sách cột numeric cho modeling
+### 3.4. Moc thoi gian snapshot da duoc sua
 
-- `artifacts/feature_store/bi_dimension_columns.csv`: danh sách cột dimension semantic cho dashboard
+Fix report da chot lai semantics sau:
 
-  
+- `snapshot_dt` la ngay cuoi cung cua thang truoc `target_month`.
+- `days_to_expire = expire_dt - snapshot_dt`
+- `membership_age_days = snapshot_dt - registration_dt`
+- `days_since_last_listen = snapshot_dt - last_log_dt`
 
-## 3. Quy tắc làm sạch dữ liệu
+Day la thay doi quan trong vi ban cu tinh theo `transaction_date` cua giao dich neo, lam sai nghia recency va tenure.
 
-  
+## 4. Quy tac lam sach du lieu
 
-- `bd` chỉ được giữ nếu nằm trong khoảng `15-65`; ngoài khoảng này được đánh dấu là unknown
+Pipeline hien tai dang dung cac quy tac sau:
 
-- Ghi chú nghiệp vụ: cần thống nhất thêm với cả nhóm. Đề xuất hiện tại là `15-65` vì đây là nhóm khách hàng mục tiêu cần quan tâm; các trường hợp nhỏ hơn, lớn hơn hoặc không xác định được xem như thiếu thông tin khách hàng
+- `bd` chi duoc xem la hop le khi nam trong khoang `15-65`; ngoai khoang nay xem nhu thieu du lieu.
+- `gender` duoc map: `male -> 1`, `female -> 2`, con lai `0`.
+- `total_secs` trong `user_logs` bi cap trong khoang `0..86400` cho moi dong log.
+- Neu `membership_expire_date < transaction_date` trong cung mot giao dich, pipeline sua `membership_expire_date = transaction_date` va gan co `invalid_expire_before_txn = 1`.
+- Cac phep chia cho `0` dung `safe_divide`, mac dinh tra ve `0.0` hoac `-1` tuy nhom feature.
+- Pipeline fail-fast neu:
+  - co `days_since_last_listen < 0` du `last_log_date` hop le;
+  - co `days_to_expire` nam ngoai khoang `[0, 31]`;
+  - co `membership_age_days < 0` du `registration_init_time` hop le;
+  - label frame cua mot thang rong hoac duplicate `msno`;
+  - test cohort build ra khong khop exact set voi `sample_submission_v2.csv`.
 
-- `total_secs` trong `user_logs` không vượt quá `86,400` giây mỗi ngày (`24 * 60 * 60`)
+## 5. Nhom feature chi tiet
 
-- `membership_expire_date < transaction_date` được chỉnh về bằng `transaction_date` và gắn cờ `invalid_expire_before_txn`
+### 5.1. Snapshot va label cohort
 
-- Giải thích: đây là một case sai logic nghiệp vụ trong cùng một giao dịch, ví dụ `transaction_date = 2017-03-05` nhưng `membership_expire_date = 2017-02-28`; điều này khác với trường hợp user hết hạn rồi quay lại gia hạn ở một giao dịch khác
+Day la cac cot xac dinh bo canh cua dong snapshot:
 
-- Các phép chia có mẫu số bằng `0` được thay bằng giá trị mặc định `0` hoặc `-1` tùy nhóm feature
+- `msno`: khoa user.
+- `target_month`: thang snapshot dang phan tich.
+- `is_churn`: label churn trong cua so 30 ngay sau het han.
+- `expire_date`: ngay het han cua anchor transaction.
+- `transaction_date`: ngay thanh toan cua anchor transaction.
+- `transaction_month`: thang cua `transaction_date`.
+- `expire_month`: thang cua `expire_date`.
+- `last_expire_month`: alias cua `expire_month`, dung cho global slicer theo ky het han.
+- `transaction_day`, `expire_day`: thanh phan ngay trong thang.
+- `is_expiring_user`: co dinh = `1`, phuc vu KPI dem tap user sap het han.
 
-  
+### 5.2. Feature giao dich hien tai
 
-## 4. Nhóm feature được tạo
-
-  
-
-Để tránh hiểu nhầm khi mỗi người có thể có cách hiểu nghiệp vụ khác nhau, phần này thống nhất cách hiểu các thuật ngữ được dùng bên dưới.
-
-  
-
-**`snapshot`** 
-là một bản ghi “ảnh chụp trạng thái của 1 user tại 1 thời điểm quan sát”, không phải toàn bộ lịch sử của user. Cụ thể, thời điểm quan sát đó là `target_month`.
-
-  
-
-- Với mỗi user và mỗi `target_month`, pipeline chọn 1 giao dịch mốc
-
-- Giao dịch mốc là giao dịch hợp lệ cuối cùng có `expire_month = target_month`, `is_cancel = 0`, và `transaction_month < target_month`
-
-- Từ giao dịch mốc này, pipeline tạo ra 1 dòng feature
-
-Ví dụ:
-  
-
-- Snapshot `201703` của user A dùng giao dịch hết hạn trong `03/2017`
-
-- Log nghe nhạc dùng từ `02/2017`
-
-- Label churn được gán bằng cách nhìn xem sau ngày hết hạn đó, trong `30` ngày tiếp theo user có gia hạn hợp lệ hay không
-
-
-**`Aggregate`** 
- Trong pipeline này, aggregate user_logs của tháng trước nghĩa là:
-
-  - Dữ liệu gốc user_logs có rất nhiều dòng cho cùng một user trong
-    Nhiều ngày
-  - Ta gom lại theo msno và theo tháng
-  - Rồi tính các thống kê như sum, mean, count
-
-  Ví dụ:
-  User A trong tháng 201702 có 10 dòng log mỗi ngày khác nhau. Ví dụ như total_secs_sum (hoặc là mean)
-
-  Sau khi aggregate, thay vì 10 dòng rời rạc, ta còn 1 dòng cho user A với mục đích:
-
-  - Giảm dữ liệu từ mức log chi tiết xuống mức user-month
-  - Tạo feature để model và BI dùng được
-  - đồng bộ grain với snapshot 1 user x 1 target_month
-  
-
-### 4.1. Snapshot và label churn theo tháng
-
-  
-
-- `target_month`: tháng snapshot đang phân tích
-
-- `is_churn`: nhãn churn trong cửa sổ `30` ngày sau mốc hết hạn
-
-- `expire_date`: ngày hết hạn của giao dịch được chọn làm mốc
-
-- `transaction_date`: ngày thanh toán của giao dịch mốc
-
-- `last_expire_month`: tháng hết hạn, phục vụ global slicer
-
-- `is_expiring_user`: gán cố định bằng `1`, dùng để đếm số user hết hạn trong snapshot đó
-
-- Giải thích: thay vì chỉ dùng `COUNT(*)`, cột cờ này giúp measure trong BI dễ tái sử dụng hơn; nếu sau này cần loại một số row khỏi mẫu phân tích, chỉ cần đổi cờ về `0`
-
-  
-
-### 4.2. Feature thanh toán và giao dịch hiện tại
-
-  
-
-- `payment_method_id`: phương thức thanh toán ở snapshot
-
-- `payment_plan_days`: số ngày của gói hiện tại
-
-- `plan_list_price`: giá niêm yết
-
-- `actual_amount_paid`: số tiền thực trả
-
-- `is_auto_renew`: có bật auto-renew hay không
-
-- `invalid_expire_before_txn`: có dữ liệu lỗi ngày hết hạn hay không; cột này chỉ để kiểm tra chất lượng dữ liệu
-
+Nhom nay mo ta hop dong hien tai cua snapshot:
+
+- `payment_method_id`
+- `payment_plan_days`
+- `plan_list_price`
+- `actual_amount_paid`
+- `is_auto_renew`
+- `invalid_expire_before_txn`
 - `discount = plan_list_price - actual_amount_paid`
-
-- `is_discount`: bằng `1` nếu có giảm giá
-
+- `is_discount`
 - `amt_per_day = actual_amount_paid / payment_plan_days`
-
-- `expected_renewal_amount`: giá trị doanh thu kỳ vọng của lần gia hạn kế tiếp; lấy `actual_amount_paid` nếu có, ngược lại lấy `plan_list_price`
-
-- `price_gap`: khoảng cách giữa giá niêm yết và số tiền thực trả
-
-- `discount_ratio = (plan_list_price - actual_amount_paid) / plan_list_price`
-
+- `expected_renewal_amount`: uu tien `actual_amount_paid`, neu khong co thi fallback `plan_list_price`
+- `price_gap = plan_list_price - actual_amount_paid`
+- `discount_ratio = price_gap / plan_list_price`
 - `payment_to_list_ratio = actual_amount_paid / plan_list_price`
-
-- `days_to_expire`: số ngày từ `transaction_date` đến `expire_date`
-
+- `days_to_expire = expire_dt - snapshot_dt`
 - `remaining_plan_ratio = days_to_expire / payment_plan_days`
-
 - `price_gap_per_plan_day = price_gap / payment_plan_days`
 
-  
+Goc nhin nghiep vu:
 
-### 4.3. Feature lịch sử giao dịch và churn
+- `expected_renewal_amount` la cot nen de tinh `Revenue at Risk`.
+- `is_auto_renew`, `amt_per_day`, `discount_ratio` la cac bien quan trong cho retention va simulation.
 
-  
+### 5.3. Lich su giao dich va lich su churn
 
-- `last_1_is_churn` đến `last_5_is_churn`: lịch sử churn của 5 chu kỳ gần nhất
+Nhom nay duoc tinh tu lich su truoc snapshot:
 
-- `churn_rate`: tỷ lệ churn lịch sử của user
+- `last_1_is_churn` den `last_5_is_churn`: 5 nhan churn gan nhat, thieu lich su thi `-1`.
+- `churn_rate`
+- `churn_count`
+- `transaction_count`: so chu ky lich su da co nhan.
+- `historical_transaction_rows`: tong so dong transaction da quan sat toi moc snapshot.
+- `historical_paid_total`
+- `historical_paid_mean`
+- `historical_list_price_mean`
+- `historical_cancel_count`
+- `historical_cancel_rate`
+- `historical_auto_renew_rate`
+- `days_since_previous_transaction`
+- `recent_churn_events`: tong churn trong cua so 5 ky gan nhat sau khi thay `-1 -> 0`.
+- `weighted_recent_churn`: tong co trong so uu tien ky moi hon.
+- `churn_rate_x_transaction_count`: feature interaction giua do dai lich su va xu huong churn.
 
-- `churn_count`: tổng số lần churn trong lịch sử được quan sát
+Goc nhin nghiep vu:
 
-- `transaction_count`: số chu kỳ lịch sử đã có nhãn
+- Nhom nay phan biet ro user moi, user co lich su on dinh, va user co dau hieu rut lui lap lai.
+- `historical_auto_renew_rate` va `historical_cancel_rate` co gia tri cao cho segmentation va predictive modeling.
 
-- `historical_transaction_rows`: tổng số dòng transaction đã có đến mốc hiện tại
+### 5.4. Aggregate `user_logs` cua thang truoc
 
-- `historical_paid_total`: tổng tiền đã thanh toán lịch sử
+Pipeline aggregate log cua `PREVIOUS_MONTH[target_month]` de dong bo grain ve `user-month`.
 
-- `historical_paid_mean`: chi tiêu trung bình mỗi giao dịch
+Cot aggregate co san:
 
-- `historical_list_price_mean`: giá niêm yết trung bình lịch sử
+- `num_25_mean`, `num_50_mean`, `num_75_mean`, `num_985_mean`, `num_100_mean`, `num_unq_mean`, `total_secs_mean`
+- `num_25_sum`, `num_50_sum`, `num_75_sum`, `num_985_sum`, `num_100_sum`, `num_unq_sum`, `total_secs_sum`
+- `count`: so dong log trong thang truoc.
+- `last_log_date`: ngay nghe gan nhat trong thang truoc.
+- `capped_log_count`: so dong bi cap `total_secs`.
 
-- `historical_cancel_count`: tổng số lần cancel
+### 5.5. Feature hanh vi nghe nhac suy dien
 
-- `historical_cancel_rate`: tỷ lệ cancel trên tổng giao dịch
+Nhung cot nay duoc tinh tu aggregate log:
 
-- `historical_auto_renew_rate`: tỷ lệ auto-renew trong lịch sử
-
-- `days_since_previous_transaction`: khoảng cách ngày so với giao dịch trước
-
-- `recent_churn_events`: tổng số sự kiện churn gần đây
-
-- `weighted_recent_churn`: churn lịch sử có trọng số ưu tiên cho các chu kỳ mới
-
-- `churn_rate_x_transaction_count`: tương tác giữa tần suất churn và độ dài lịch sử
-
-  
-
-### 4.4. Aggregate `user_logs` của tháng trước
-
-  
-
-Nhóm này được tính trên tháng trước `target_month`.
-
-  
-
-- `num_25_mean`, `num_50_mean`, `num_75_mean`, `num_985_mean`, `num_100_mean`, `num_unq_mean`, `total_secs_mean`: trung bình theo dòng log
-
-- `num_25_sum`, `num_50_sum`, `num_75_sum`, `num_985_sum`, `num_100_sum`, `num_unq_sum`, `total_secs_sum`: tổng hành vi nghe
-
-- `count`: tổng số dòng log của user trong tháng trước
-
-- `last_log_date`: ngày nghe nhạc gần nhất của user trong tháng trước
-
-- `capped_log_count`: số dòng log bị cap `total_secs`
-
-  
-
-### 4.5. Feature hành vi nghe nhạc suy diễn
-
-  
-
-- `secs_per_log = total_secs_sum / count`
-
-- `unique_per_log = num_unq_sum / count`
-
-- `num100_per_log = num_100_sum / count`
-
+- `secs_per_log`
+- `unique_per_log`
+- `num100_per_log`
 - `listen_events_sum = num_25_sum + num_50_sum + num_75_sum + num_985_sum + num_100_sum`
-
 - `skip_events_sum = num_25_sum + num_50_sum + num_75_sum`
-
-- `listen_events_per_log = listen_events_sum / count`
-
+- `listen_events_per_log`
 - `weighted_completion_sum = 0.25*num_25_sum + 0.50*num_50_sum + 0.75*num_75_sum + 0.985*num_985_sum + 1.0*num_100_sum`
-
-- `weighted_completion_per_log = weighted_completion_sum / count`
-
+- `weighted_completion_per_log`
 - `completion_ratio = weighted_completion_sum / listen_events_sum`
-
 - `skip_ratio = skip_events_sum / listen_events_sum`
-
 - `discovery_ratio = num_unq_sum / listen_events_sum`
-
 - `replay_ratio = 1 - discovery_ratio`
-
 - `avg_secs_per_unique = total_secs_sum / num_unq_sum`
-
 - `secs_per_plan_day = total_secs_sum / payment_plan_days`
-
 - `uniques_per_plan_day = num_unq_sum / payment_plan_days`
-
 - `logs_per_plan_day = count / payment_plan_days`
-
 - `secs_per_paid_amount = total_secs_sum / actual_amount_paid`
-
-- `days_since_last_listen = transaction_date - last_log_date`
-
+- `days_since_last_listen = snapshot_dt - last_log_dt`
 - `capped_log_share = capped_log_count / count`
 
-  
+Goc nhin nghiep vu:
 
-### 4.6. Feature member và nhân khẩu học
+- `skip_ratio` va `discovery_ratio` la hai proxy chinh cho insight "nham chan noi dung".
+- `completion_ratio` giup phan biet viec nghe het bai va hanh vi bo giua chung.
+- `days_since_last_listen` va `count` la bien recency/frequency phu hop cho survival va churn scoring.
 
-  
+### 5.6. Feature member va calendar
 
-- `city`: mã thành phố
+Nhom nay duoc enrich tu `members_v3.csv`:
 
-- `bd`: tuổi đã được làm sạch
-
-- `age`: biến tuổi sau cleaning, unknown = `-1`
-
-- `has_valid_age`: có tuổi hợp lệ hay không
-
-- `gender`: giới tính mã hóa, `0 = unknown`, `1 = male`, `2 = female`
-
-- `gender_profile`: nhãn semantic của giới tính
-
-- `registered_via`: kênh đăng ký
-
-- `registration_init_time`: ngày đăng ký gốc
-
-- `registration_year`, `registration_month`, `registration_day`: các cột thời gian tách từ ngày đăng ký
-
-- `membership_age_days = transaction_date - registration_init_time`
-
+- `city`
+- `bd`
+- `age = bd` sau khi da clean, neu thieu thi `-1`
+- `has_valid_age`
+- `gender`: ma so `0/1/2`
+- `gender_profile`: nhan semantic `Unknown/Male/Female`
+- `registered_via`
+- `registration_init_time`
+- `registration_year`
+- `registration_month`
+- `registration_day`
+- `membership_age_days = snapshot_dt - registration_dt`
 - `tenure_months = membership_age_days / 30`
 
-  
+### 5.7. Flags va interaction phuc vu BI / simulation
 
-### 4.7. Feature RFM
+Notebook tao san cac cot logic cho segmentation va scenario:
 
-  
+- `is_manual_renew = 1` neu `is_auto_renew = 0`
+- `high_skip_flag = 1` neu `skip_ratio >= 0.5`
+- `low_discovery_flag = 1` neu `discovery_ratio < 0.2`
+- `deal_hunter_flag = 1` neu `0 < amt_per_day < 4.5`
+- `free_trial_flag = 1` neu `expected_renewal_amount <= 0`
+- `content_fatigue_flag = 1` neu vua `high_skip` vua `low_discovery`
+- `auto_renew_discount_interaction = is_auto_renew * is_discount`
 
-- `rfm_recency_score`: điểm recency dựa trên `days_since_last_listen`
+Day la lop feature quan trong cho:
 
-- `rfm_frequency_score`: điểm frequency dựa trên `count`
+- Tab 1 scatter + segmentation.
+- Tab 2 revenue at risk va top flight-risk segment.
+- Tab 3 simulation chuyen doi manual -> auto, deal -> standard, skip high -> skip low.
 
-- `rfm_monetary_score`: điểm monetary dựa trên `expected_renewal_amount`
+### 5.8. RFM score
 
-- `rfm_total_score`: tổng ba thành phần RFM
+Notebook co mot lop RFM don gian:
 
-- `rfm_segment_code`: mã nhóm RFM
+- `rfm_recency_score`
+  - `3` neu co nghe va `days_since_last_listen <= 7`
+  - `2` neu `<= 21`
+  - `1` neu con co nghe
+  - `0` neu khong co listening data
+- `rfm_frequency_score`
+  - `3` neu `count > 15`
+  - `2` neu `count > 5`
+  - `1` neu `count > 0`
+  - `0` neu khong co log
+- `rfm_monetary_score`
+  - `3` neu `expected_renewal_amount >= 150`
+  - `2` neu `>= 100`
+  - `1` neu `> 0`
+  - `0` neu bang `0`
+- `rfm_total_score = recency + frequency + monetary`
+- `rfm_segment_code`
+- `rfm_segment`
 
-- `rfm_segment`: nhãn nhóm RFM
+Mapping `rfm_segment`:
 
-  
+- `0 -> Unclassified`
+- `1 -> Low Value`
+- `2 -> Mid Value`
+- `3 -> High Value`
 
-Quy tắc scoring hiện tại:
+### 5.9. Segment semantic cho BI
 
-  
+Notebook da dong goi san cac segment code + label nhu sau.
 
-- Recency: `3` nếu nghe trong `<= 7` ngày, `2` nếu `<= 21`, `1` nếu có nghe nhưng xa hơn, `0` nếu không có log
+### Age
 
-- Frequency: `3` nếu `count > 15`, `2` nếu `6-15`, `1` nếu `1-5`, `0` nếu bằng `0`
+- `age_segment_code`
+- `age_segment`
 
-- Monetary: `3` nếu `expected_renewal_amount >= 150`, `2` nếu `100-149`, `1` nếu `1-99`, `0` nếu bằng `0`
+Nguong:
 
-  
+- `15-20`
+- `21-25`
+- `26-35`
+- `36-50`
+- `51-65`
+- `Unknown`
 
-### 4.8. Segment semantic cho BI
+### Price
 
-  
-
-- `age_segment_code`, `age_segment`
-
-- `price_segment_code`, `price_segment`
-
-- `loyalty_segment_code`, `loyalty_segment`
-
-- `active_segment_code`, `active_segment`
-
-- `skip_segment_code`, `skip_segment`
-
-- `discovery_segment_code`, `discovery_segment`
-
-- `renewal_segment_code`, `renewal_segment`
-
-- `rfm_segment_code`, `rfm_segment`
-
-- `bi_segment_name`: segment tổng hợp theo công thức `loyalty | renewal | price | discovery`
-
-  
-
-Quy tắc chia nhóm:
-
-  
-
+- `price_segment_code`
 - `price_segment`
 
-- `Free Trial / Zero Pay`: `amt_per_day <= 0`
+Nguong:
 
-- `Deal Hunter < 4.5`: `0 < amt_per_day < 4.5`
+- `Free Trial / Zero Pay`
+- `Deal Hunter < 4.5`
+- `Standard 4.5-6.5`
+- `Premium >= 6.5`
+- `Unknown`
 
-- `Standard 4.5-6.5`: `4.5 <= amt_per_day < 6.5`
+### Loyalty
 
-- `Premium > 6.5`: `amt_per_day >= 6.5`
-
-  
-
+- `loyalty_segment_code`
 - `loyalty_segment`
 
+Nguong:
+
 - `New < 30d`
-
 - `Growing 30-179d`
-
 - `Established 180-364d`
-
 - `Loyal >= 365d`
+- `Unknown`
 
-  
+### Activity
 
+- `active_segment_code`
 - `active_segment`
 
-- `Inactive`: `count = 0`
+Nguong:
 
+- `Inactive`
 - `Light 1-5 logs`
-
 - `Active 6-15 logs`
-
 - `Heavy > 15 logs`
+- `Unknown`
 
-  
+### Skip
 
+- `skip_segment_code`
 - `skip_segment`
 
-- `Low < 20%`
-
-- `Medium 20-50%`
-
-- `High > 50%`
+Nguong:
 
 - `No Listening Data`
+- `Low < 20%`
+- `Medium 20-50%`
+- `High >= 50%`
 
-  
+### Discovery
 
+- `discovery_segment_code`
 - `discovery_segment`
 
-- `Habit < 20%`
-
-- `Balanced 20-50%`
-
-- `Explore > 50%`
+Nguong:
 
 - `No Listening Data`
+- `Habit < 20%`
+- `Balanced 20-50%`
+- `Explore >= 50%`
 
-  
+### Renewal
 
+- `renewal_segment_code`
 - `renewal_segment`
 
+Gia tri:
+
 - `Pay_Auto-Renew`
-
 - `Pay_Manual`
+- `Unknown`
 
-  
+### Segment tong hop
 
-### 4.9. Flag điều khiển cho simulation và data quality
+- `rfm_segment_code`
+- `rfm_segment`
+- `bi_segment_name = loyalty_segment | renewal_segment | price_segment | discovery_segment`
 
-  
+`BI_DIMENSION_COLUMNS` dang uu tien cac cot:
 
-- `is_manual_renew`: biến đổi `is_auto_renew` thành cờ thuận cho BI
+- `target_month`
+- `last_expire_month`
+- `age_segment`
+- `gender_profile`
+- `renewal_segment`
+- `price_segment`
+- `loyalty_segment`
+- `active_segment`
+- `skip_segment`
+- `discovery_segment`
+- `rfm_segment`
+- `bi_segment_name`
 
-- `high_skip_flag`: user có `skip_ratio >= 0.5`
+## 6. Mapping vao use case san pham
 
-- `low_discovery_flag`: user có `discovery_ratio < 0.2`
+### 6.1. Tab 1: Descriptive Analysis
 
-- `deal_hunter_flag`: user có `0 < amt_per_day < 4.5`
+Co the su dung truc tiep tu feature store:
 
-- `free_trial_flag`: user có `expected_renewal_amount <= 0`
+- KPI:
+  - `Total Expiring Users`: dem `is_expiring_user`
+  - `Historical Churn Rate`: trung binh `is_churn`
+  - `Auto-Renew Rate`: trung binh `is_auto_renew`
+  - `Overall Median Survival`: can tinh them tu `membership_age_days` hoac survival layer rieng
+- Kaplan-Meier dimensions:
+  - `age_segment`
+  - `gender_profile`
+  - `skip_segment`
+  - Can thiet ke them dimension cho "transaction frequency" neu muon dung dung mo ta san pham
+- 100% stacked bars:
+  - `price_segment`
+  - `loyalty_segment`
+  - `active_segment`
+- Scatter boredom:
+  - `discovery_ratio`
+  - `skip_ratio`
+  - `is_churn` hoac metric risk downstream de to mau
 
-- `content_fatigue_flag`: user vừa có `skip_ratio` cao vừa có `discovery_ratio` thấp
+### 6.2. Tab 2: Predictive Analysis
 
-- `auto_renew_discount_interaction`: tương tác giữa auto-renew và sử dụng discount
+Feature store batch hien tai moi cung cap dau vao cho mo hinh, chua cung cap dau ra du bao chinh thuc. Co the dung cac nhom sau lam input:
 
-  
+- Thanh toan: `is_auto_renew`, `expected_renewal_amount`, `discount_ratio`, `amt_per_day`
+- Lich su churn: `last_k_is_churn`, `churn_rate`, `weighted_recent_churn`
+- Hanh vi nghe: `skip_ratio`, `discovery_ratio`, `completion_ratio`, `days_since_last_listen`
+- Loyalty / tenure: `membership_age_days`, `tenure_months`, `loyalty_segment`
+- Value / RFM: `rfm_total_score`, `historical_paid_total`, `historical_paid_mean`
 
-## 5. Mapping vào dashboard BI
+Chua co san trong notebook:
 
-  
+- `churn_probability`
+- `predicted_future_cltv`
+- `hazard_ratio`
+- `primary_risk_driver`
+- `shap_values`
 
-### 5.1. Tab 1: Descriptive Analysis
+Vi vay, Tab 2 hien chi co the dung feature store nay lam input layer, sau do noi them model serving layer.
 
-  
+### 6.3. Tab 3: Prescriptive Simulation
 
-- `Total Expiring Users`: đếm `is_expiring_user` theo `last_expire_month`
+Feature store batch da co cac bien can de mo phong:
 
-- `Historical Churn Rate`: trung bình `is_churn`
+- Chuyen `Pay_Manual -> Pay_Auto-Renew`: dung `is_manual_renew`, `renewal_segment`
+- Upsell `Deal Hunter / Free Trial -> Standard/Premium`: dung `price_segment`, `deal_hunter_flag`, `free_trial_flag`, `expected_renewal_amount`
+- Giam met moi noi dung: dung `high_skip_flag`, `low_discovery_flag`, `content_fatigue_flag`, `skip_ratio`, `discovery_ratio`
 
-- `Overall Median Survival`: median của `membership_age_days`
+Nhung Tab 3 van chua co trong notebook:
 
-- `Auto-Renew Rate`: trung bình `is_auto_renew`
+- cong thuc hazard/HR chinh thuc tu mo hinh Cox
+- cong thuc saved revenue / incremental revenue da duoc hieu chuan
+- sensitivity / ROI per 1% shift da duoc hoc tu du lieu
 
-- `Kaplan-Meier dimensions`: sử dụng `age_segment`, `gender_profile`, `active_segment`, `skip_segment`
+## 7. Khoang trong va xung dot can chot
 
-- `100% Stacked Bar`: sử dụng `price_segment`, `loyalty_segment`, `active_segment` + `is_churn`
+Day la cac diem chua thong nhat giua feature store batch, mo ta san pham va serving layer hien tai:
 
-- `Behavior Scatter`: sử dụng `discovery_ratio`, `skip_ratio`, `expected_renewal_amount`, `is_churn`
+### 7.1. "Transaction Frequency" chua co dinh nghia canonical trong notebook
 
-  
+`project_desc.md` muon dung dimension "Tan suat giao dich" cho Kaplan-Meier. Tuy nhien notebook batch khong tao cot segment ten `txn_freq_bucket`.
 
-### 5.2. Tab 2: Predictive Analysis
+Hien tai co 3 lua chon khac nhau:
 
-  
+- Dung `transaction_count` roi bucket hoa them.
+- Dung `historical_transaction_rows` roi bucket hoa them.
+- Dung `active_segment`, nhung day la tan suat log nghe, khong phai tan suat giao dich.
 
-Notebook này chỉ tạo feature đầu vào cho mô hình, chưa tạo đầu ra dự báo. Các feature quan trọng để đưa vào mô hình classification, Cox, và CLTV gồm:
+Can chot 1 dinh nghia canonical de Tab 1 va feature store khop nhau.
 
-  
+### 7.2. Segment cua notebook batch dang khac segment cua realtime Tab 1
 
-- `skip_ratio`, `discovery_ratio`, `completion_ratio`
+Serving layer realtime hien tai dang bucket hoa khac notebook o nhieu diem:
 
-- `expected_renewal_amount`, `discount_ratio`, `amt_per_day`
+- `age`: notebook dung `15-20 / 21-25 / 26-35 / 36-50 / 51-65`, trong khi realtime layer dung `15_20 / 21_30 / 31_40 / 41_plus`.
+- `price_segment`: notebook dung moc `4.5` va `6.5`, trong khi realtime layer dung `4.5` va `8.0`.
+- `loyalty_segment`: notebook dung `30 / 180 / 365 ngay`, trong khi realtime layer dung `90 / 365 ngay`.
+- `active_segment`: notebook bucket theo `count` log trong thang, trong khi realtime layer bucket theo `tong giay nghe / active day`.
 
-- `historical_auto_renew_rate`, `historical_cancel_rate`, `weighted_recent_churn`
+Neu khong chot 1 bo threshold chung, Tab 1 batch view va realtime view se so sanh sai nhau.
 
-- `membership_age_days`, `days_since_last_listen`, `rfm_total_score`
+### 7.3. Product doc mo ta model "da co", nhung notebook batch chua sinh output model
 
-- `price_segment_code`, `loyalty_segment_code`, `active_segment_code`
+`project_desc.md` mo ta:
 
-  
+- Classification churn probability
+- BG/NBD + Gamma-Gamma CLTV
+- Cox hazard ratio
 
-Sau khi có mô hình, BI có thể tính:
+Nhung notebook batch hien tai chi dung o tang feature store + label. Day la khoang trong ve implementation, khong phai feature da co.
 
-  
+## 8. De xuat chuan hoa
 
-- `Predicted Revenue at Risk = churn_probability * expected_renewal_amount`
+De giam sai lech ve sau, nen chot:
 
-- `Top Flight-Risk Segment`: group theo `bi_segment_name`
-
-- `Value vs Risk`: dùng `Predicted Future CLTV` và `churn_probability`
-
-  
-
-### 5.3. Tab 3: Prescriptive Simulation
-
-  
-
-Ba cần điều khiển trong mô tả dashboard đã có sẵn feature đầu vào:
-
-  
-
-- Chuyển user từ manual sang auto-renew: `renewal_segment`, `is_manual_renew`
-
-- Upsell từ deal/trial lên giá chuẩn: `price_segment`, `deal_hunter_flag`, `free_trial_flag`
-
-- Giảm skip ratio: `skip_ratio`, `high_skip_flag`, `content_fatigue_flag`
-
-  
-
-Nghĩa là tab simulation có thể bắt đầu từ feature store này, sau đó nối thêm hệ số tác động từ model Cox hoặc rule engine.
+1. Notebook batch nay la nguon su that cho feature store offline.
+2. Realtime serving layer phai bucket hoa theo cung threshold voi batch, hoac tai lieu phai noi ro do la hai metric khac nhau.
+3. Tab 2 va Tab 3 chi nen goi la "proxy" neu chua thay mo hinh hoc may that.
+4. Neu muon goi ten "Transaction Frequency" tren UI, can tao them 1 cot segment ro rang ngay trong feature store.
