@@ -1,16 +1,21 @@
 # Report And Slides
 
-Folder nay chua tai lieu ho tro viet bao cao, sap xep noi dung trinh bay va demo.
+Folder này chứa tài liệu hỗ trợ viết báo cáo, sắp xếp nội dung trình bày, và demo.
 
-File chinh:
+## File Chính
 
-- `kkbox_pipeline_descriptions.md`: mo ta tung pipeline theo kieu box-arrow-box de ve diagram.
-- `kkbox_report_diagrams.md`: danh sach diagram nen ve, theo thu tu ke chuyen.
-- `demo_script.md`: kich ban demo khi can trinh bay san pham.
+- `kkbox_pipeline_descriptions.md`: mô tả từng pipeline theo kiểu box-arrow-box để vẽ diagram.
+- `kkbox_report_diagrams.md`: danh sách diagram nên vẽ, theo thứ tự kể chuyện.
+- `demo_script.md`: kịch bản demo khi cần trình bày sản phẩm.
 
-Neu can lam slide nhanh:
+## Luồng Đọc Nhanh Để Làm Slide
 
-1. doc `kkbox_report_diagrams.md`
-2. doc `kkbox_pipeline_descriptions.md` de ve lai cac pipeline chinh
-3. lay bo toi thieu o phan cuoi file
-4. doi chieu lai terminology voi `../system_description/kkbox_feature_catalog.md`
+1. đọc `kkbox_report_diagrams.md`
+2. đọc `kkbox_pipeline_descriptions.md` để vẽ lại các pipeline chính
+3. chốt thông điệp bằng cách đối chiếu `../system_description/predictive.md` và `../system_description/prescriptive.md`
+4. đối chiếu lại terminology với `../system_description/kkbox_feature_catalog.md`
+
+## Lưu Ý
+
+- Folder này dùng để kể chuyện. Nếu cần semantics canonical, quay lại `../system_description/`.
+- Diagram và pipeline trong folder này phải nói cùng ngôn ngữ với `kkbox_feature_catalog.md`.

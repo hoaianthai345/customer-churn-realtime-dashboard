@@ -91,9 +91,14 @@ docker compose exec spark bash apps/streaming/run/run_all_jobs.sh
 ## 9) Docs Structure
 
 - `docs/README.md`: entry point and reading order for all documentation.
+- `docs/system_description/project_desc.md`: product scope, maturity, and conflicts to keep in mind.
 - `docs/system_description/team_coding_guide.md`: coding and architecture rules for contributors.
 - `docs/system_description/tab1_data_strategy.md`: data design for Tab 1 with precompute history + realtime materialization.
 - `docs/system_description/kkbox_feature_catalog.md`: canonical feature semantics for the KKBOX batch feature store.
+- `docs/system_description/kkbox_tab2_predictive_pipeline.md`: train/score contract and artifact outputs for Tab 2.
+- `docs/system_description/predictive.md`: grounded business narrative for Tab 2.
+- `docs/system_description/prescriptive.md`: grounded business narrative for Tab 3.
 - `docs/architecture_diagrams/architecture.md`: end-to-end runtime architecture.
+- `docs/report_and_slides/kkbox_pipeline_descriptions.md`: pipeline descriptions for report diagrams.
 - `docs/report_and_slides/kkbox_report_diagrams.md`: diagram inventory for report writing and slide presentation.
 # customer-churn-realtime-dashboard
