@@ -37,12 +37,13 @@ Tài liệu này không override semantics feature. Nếu có mâu thuẫn:
 - `feature_prep.ipynb` đã được vá các lỗi ép kiểu và validation gãy.
 - Đã có cache aggregate `user_logs` theo tháng để tránh chạy lại quá lâu.
 - Ba notebook trong `team_code/tab1`, `team_code/tab2`, `team_code/tab3` đã được tách thành bản tự chứa để chạy trên Kaggle.
+- Đã có feature store canonical trong `project-realtime-bi/data/artifacts/feature_store/`.
+- Đã có smoke test end-to-end cho 3 tab trên bộ artifact local hiện tại trong `project-realtime-bi/data/artifacts/_smoke_test/`.
 - Tài liệu hệ thống đã được gom lại thành các nhóm `system_description`, `architecture_diagrams`, `report_and_slides`.
 
 ### 3.2. Chưa hoàn tất
 
-- Chưa có một lần chạy full ổn định, có log và artifact chuẩn hóa để dùng làm baseline.
-- Tab 1, Tab 2, Tab 3 chưa được kiểm thử end-to-end theo cùng một bộ artifact canonical.
+- Chưa có một lần chạy full ổn định trên Kaggle kèm log và artifact chuẩn hóa để dùng làm baseline chính thức.
 - Tab 3 vẫn còn mang tính prototype nghiệp vụ, chưa được refactor hoàn toàn theo pipeline canonical.
 - Một số threshold và dimension giữa batch và lớp phục vụ realtime vẫn chưa đồng bộ tuyệt đối.
 - Chưa có checklist phát hành nội bộ cho demo, báo cáo và handoff.
@@ -104,6 +105,7 @@ Ba notebook của `team_code` chạy độc lập, rõ đầu vào và rõ đầ
 - Mỗi notebook có thể chạy độc lập trên Kaggle.
 - Có phần mô tả “input / output / run order” ngay trong notebook hoặc README.
 - Không còn phụ thuộc vào `team_code/notebook_lib`.
+- Có ít nhất một lần smoke test pass với output summary lưu lại trong artifact.
 
 ## 4.3. Workstream C: Hoàn thiện Tab 1 theo dữ liệu canonical
 

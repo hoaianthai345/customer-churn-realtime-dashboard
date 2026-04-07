@@ -15,6 +15,7 @@ Thu tu khuyen nghi:
 2. `team_code/tab1/kkbox-descriptive-tab.ipynb`
 3. `team_code/tab2/kkbox-train-predictive-tab.ipynb`
 4. `team_code/tab3/kkbox-simulation-2.ipynb`
+5. `team_code/tab3/kkbox-simulation-monte-carlo.ipynb` neu can them lop uncertainty cho Tab 3
 
 Logic phu thuoc:
 
@@ -47,9 +48,7 @@ Vai tro:
 - scope chi gom KPI, Kaplan-Meier, segment mix, boredom scatter;
 - khong dua forecasting/risk simulation vao Tab 1.
 
-Notebook goi:
-
-- `team_code.notebook_lib.tab1_descriptive_artifacts.run_tab1_descriptive_artifacts`
+Notebook hien tai da tu chua logic can thiet trong code cell, khong con phu thuoc runtime vao `.py` helper.
 
 Thu muc output mac dinh:
 
@@ -81,9 +80,7 @@ Vai tro:
 - score validation month va score month;
 - xuat scored artifact de UI/backend doc truc tiep.
 
-Notebook goi:
-
-- `team_code.notebook_lib.tab2_predictive_training.run_tab2_predictive_training`
+Notebook hien tai da tu chua logic train/score trong code cell, khong con phu thuoc runtime vao `.py` helper.
 
 Thu muc output mac dinh:
 
@@ -126,9 +123,7 @@ Vai tro:
   - `Deal / Free Trial -> Standard / Premium`
   - `High Skip / Low Discovery -> healthier engagement`
 
-Notebook goi:
-
-- `team_code.notebook_lib.tab3_prescriptive_artifacts.run_tab3_prescriptive_artifacts`
+Notebook hien tai da tu chua logic deterministic prescriptive simulation trong code cell, khong con phu thuoc runtime vao `.py` helper.
 
 Thu muc output mac dinh:
 
@@ -154,13 +149,49 @@ Y nghia:
 - `tab3_sensitivity_201704.parquet`: sensitivity theo muc effort/share cua tung lever.
 - `manifest.json`: metadata input/output cua notebook.
 
+### 3.4. Tab 3 Monte Carlo: `team_code/tab3/kkbox-simulation-monte-carlo.ipynb`
+
+Vai tro:
+
+- mo rong Tab 3 tu deterministic scenario sang `portfolio Monte Carlo simulation`;
+- dung baseline risk tu output `Tab 2`;
+- mo phong phan bo revenue / churn sau can thiep duoi bat dinh tham so;
+- phu hop de dua vao phu luc hoac phan sensitivity nang cao trong bao cao.
+
+Notebook hien tai da tu chua logic trong code cell, khong con phu thuoc runtime vao `.py` helper.
+
+Thu muc output mac dinh:
+
+- `artifacts_tab3_monte_carlo/`
+
+Artifact duoc sinh ra:
+
+- `tab3_mc_member_level_201704.parquet`
+- `tab3_mc_units_201704.parquet`
+- `tab3_monte_carlo_runs_201704.parquet`
+- `tab3_monte_carlo_percentiles_201704.parquet`
+- `tab3_monte_carlo_summary_201704.json`
+- `tab3_deterministic_summary_201704.json`
+- `manifest.json`
+
+Y nghia:
+
+- `tab3_mc_member_level_201704.parquet`: member-level scenario sau deterministic simulation.
+- `tab3_mc_units_201704.parquet`: simulation unit da duoc aggregate de Monte Carlo chay nhanh.
+- `tab3_monte_carlo_runs_201704.parquet`: ket qua tung lan chay Monte Carlo.
+- `tab3_monte_carlo_percentiles_201704.parquet`: bang percentile cho KPI chinh.
+- `tab3_monte_carlo_summary_201704.json`: summary mean/p05/p50/p95 va xac suat net positive.
+- `tab3_deterministic_summary_201704.json`: summary deterministic de doi chieu voi Monte Carlo.
+- `manifest.json`: metadata input/output cua notebook.
+
 ## 4. Thu muc artifact mac dinh
 
-Mac dinh, sau khi run xong se co 3 thu muc:
+Mac dinh, sau khi run xong se co 4 thu muc:
 
 - `artifacts_tab1_descriptive/`
 - `artifacts_tab2_predictive/`
 - `artifacts_tab3_prescriptive/`
+- `artifacts_tab3_monte_carlo/`
 
 Neu can doi cho luu artifact, sua bien `OUTPUT_DIR` trong notebook truoc khi run.
 
@@ -180,6 +211,7 @@ Vi du:
 - copy `artifacts_tab1_descriptive/`
 - copy `artifacts_tab2_predictive/`
 - copy `artifacts_tab3_prescriptive/`
+- copy `artifacts_tab3_monte_carlo/`
 
 ### Cach 2. Nen artifact thanh file zip roi tai ve
 
@@ -191,6 +223,7 @@ Lenh mau:
 zip -r tab1_descriptive_artifacts.zip artifacts_tab1_descriptive
 zip -r tab2_predictive_artifacts.zip artifacts_tab2_predictive
 zip -r tab3_prescriptive_artifacts.zip artifacts_tab3_prescriptive
+zip -r tab3_monte_carlo_artifacts.zip artifacts_tab3_monte_carlo
 ```
 
 Neu muon gom tat ca:
@@ -199,7 +232,8 @@ Neu muon gom tat ca:
 zip -r kkbox_all_artifacts.zip \
   artifacts_tab1_descriptive \
   artifacts_tab2_predictive \
-  artifacts_tab3_prescriptive
+  artifacts_tab3_prescriptive \
+  artifacts_tab3_monte_carlo
 ```
 
 ### Cach 3. Tao zip ngay trong notebook

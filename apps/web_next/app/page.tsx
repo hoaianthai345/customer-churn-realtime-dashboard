@@ -989,7 +989,7 @@ export default function HomePage() {
       {activeTab === "tab2" ? (
         <>
           <section className="panel model-panel">
-            <h2>Model Parameters (for churn probability and CLTV scoring)</h2>
+            <h2>Predictive Model Controls</h2>
             <div className="param-grid">
               <label>
                 Base Prob
@@ -1081,7 +1081,7 @@ export default function HomePage() {
               </label>
             </div>
             <p className="panel-note">
-              Model params above are sent to API on each change and reused in Tab 3 simulation.
+              Trong artifact-backed mode, Tab 2 ưu tiên output từ model đã train. Các tham số trên chỉ còn vai trò tương thích ngược và sẽ không override scored artifact production.
             </p>
           </section>
 
@@ -1099,7 +1099,7 @@ export default function HomePage() {
               <small>Sample users: {tab2Data ? formatNumber(tab2Data.meta.sample_user_count) : "-"}</small>
             </article>
             <article className="kpi-card">
-              <h3>Total Predicted Future CLTV</h3>
+              <h3>Total Expected Retained Revenue (30d)</h3>
               <p>{tab2Data ? formatCurrency(tab2Data.kpis.predicted_total_future_cltv) : "-"}</p>
             </article>
             <article className="kpi-card">
@@ -1136,7 +1136,7 @@ export default function HomePage() {
                     <th>Segment</th>
                     <th>Users</th>
                     <th>Avg Churn %</th>
-                    <th>Avg Future CLTV</th>
+                    <th>Avg Retained Revenue (30d)</th>
                     <th>Quadrant</th>
                   </tr>
                 </thead>
@@ -1155,7 +1155,7 @@ export default function HomePage() {
             </article>
 
             <article className="panel">
-              <h2>Predicted Revenue Leakage By Driver</h2>
+              <h2>Revenue at Risk by Driver</h2>
               <div className="leak-list">
                 {(tab2Data?.revenue_leakage ?? []).map((row) => {
                   const maxRisk = Math.max(
@@ -1180,7 +1180,7 @@ export default function HomePage() {
             </article>
 
             <article className="panel">
-              <h2>Forecasted Survival Decay (T+1/T+3/T+6/T+12)</h2>
+              <h2>Forecasted Retention Decay (T+1/T+3/T+6/T+12)</h2>
               <table>
                 <thead>
                   <tr>
@@ -1277,11 +1277,11 @@ export default function HomePage() {
 
           <section className="kpi-grid">
             <article className="kpi-card">
-              <h3>Baseline Avg Hazard</h3>
+              <h3>Baseline Avg Risk</h3>
               <p>{tab3Data ? tab3Data.kpis.baseline_avg_hazard.toFixed(3) : "-"}</p>
             </article>
             <article className="kpi-card">
-              <h3>Scenario Avg Hazard</h3>
+              <h3>Scenario Avg Risk</h3>
               <p>{tab3Data ? tab3Data.kpis.scenario_avg_hazard.toFixed(3) : "-"}</p>
               <small>
                 Delta: {tab3Data ? (tab3Data.kpis.scenario_avg_hazard - tab3Data.kpis.baseline_avg_hazard).toFixed(3) : "-"}
@@ -1317,7 +1317,7 @@ export default function HomePage() {
 
           <section className="panel-grid tab3-grid">
             <article className="panel">
-              <h2>Population Hazard Shift (Baseline vs Scenario)</h2>
+              <h2>Population Risk Shift (Baseline vs Scenario)</h2>
               <div className="hazard-histogram">
                 {(tab3Data?.hazard_histogram ?? []).map((point, idx) => {
                   const baseHeight = (Number(point.baseline_density) / tab3MaxDensity) * 100;
@@ -1330,7 +1330,7 @@ export default function HomePage() {
                   );
                 })}
               </div>
-              <p className="scatter-note">Gray = baseline, blue = scenario. Bars shifting lower indicates lower hazard profile.</p>
+              <p className="scatter-note">Gray = baseline, blue = scenario. Cột dịch xuống thấp hơn thể hiện phân bố rủi ro tốt hơn sau can thiệp.</p>
             </article>
 
             <article className="panel">

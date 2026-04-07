@@ -17,6 +17,12 @@ import clickhouse_connect
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from .artifact_backend import (
+    available_tab2_months,
+    build_tab2_predictive_payload,
+    build_tab3_prescriptive_payload,
+)
+
 
 def _first_day_of_month(year: int, month: int) -> date:
     return date(year=year, month=month, day=1)
@@ -1357,7 +1363,8 @@ def health() -> Dict[str, str]:
 
 @app.get("/api/v1/month-options")
 def month_options() -> Dict[str, Any]:
-    return {"months": _load_month_options()}
+    months = sorted(set(_load_month_options()).union(set(available_tab2_months())))
+    return {"months": months}
 
 
 @app.get("/api/v1/tab1/month-options")
@@ -1437,7 +1444,14 @@ def tab2_predictive(
 
     try:
         month_start, _ = _month_bounds(year, month)
-        return _build_tab2_predictive(month_start, segment_type, segment_value, sample_limit, params)
+        try:
+            return build_tab2_predictive_payload(
+                month_start=month_start,
+                segment_type=segment_type,
+                segment_value=segment_value,
+            )
+        except FileNotFoundError:
+            return _build_tab2_predictive(month_start, segment_type, segment_value, sample_limit, params)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1493,16 +1507,26 @@ def tab3_prescriptive(
 
     try:
         month_start, _ = _month_bounds(year, month)
-        return _build_tab3_prescriptive(
-            month_start=month_start,
-            segment_type=segment_type,
-            segment_value=segment_value,
-            sample_limit=sample_limit,
-            params=params,
-            auto_shift_pct=auto_shift_pct,
-            upsell_shift_pct=upsell_shift_pct,
-            skip_shift_pct=skip_shift_pct,
-        )
+        try:
+            return build_tab3_prescriptive_payload(
+                month_start=month_start,
+                segment_type=segment_type,
+                segment_value=segment_value,
+                auto_shift_pct=auto_shift_pct,
+                upsell_shift_pct=upsell_shift_pct,
+                skip_shift_pct=skip_shift_pct,
+            )
+        except FileNotFoundError:
+            return _build_tab3_prescriptive(
+                month_start=month_start,
+                segment_type=segment_type,
+                segment_value=segment_value,
+                sample_limit=sample_limit,
+                params=params,
+                auto_shift_pct=auto_shift_pct,
+                upsell_shift_pct=upsell_shift_pct,
+                skip_shift_pct=skip_shift_pct,
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
