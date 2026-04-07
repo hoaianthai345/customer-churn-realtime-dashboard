@@ -1,13 +1,44 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 .pytest_cache/
+.ipynb_checkpoints/
 .checkpoints/
-data/processed/*.csv
-*.log
+
+# Local environment
+.env
+.env.*
+.venv/
+venv/
+
+# OS / editor
 .DS_Store
-*.zip
-diagram.xml
-*.csv
-*.7z
+*.log
+
+# Frontend build outputs
 apps/web_next/node_modules/
 apps/web_next/.next/
+
+# Generated archives / local design files
+*.zip
+*.7z
+diagram.xml
+
+# Generated outputs
+/artifacts/
+/data/artifacts/
+/data/processed/
+/data/results.zip
+
+# Heavy raw datasets
+/data/raw/*.csv
+/data/raw/*.csv.7z
+/data/raw/*.7z
+/data/raw/*.parquet
+
+# Keep lightweight references and samples
+!/data/raw/WSDMChurnLabeller.scala
+!/data/sample/
+!/data/sample/**
