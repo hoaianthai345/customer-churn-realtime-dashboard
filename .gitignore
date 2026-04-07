@@ -32,6 +32,9 @@ diagram.xml
 /data/processed/
 /data/results.zip
 
+# Accidental browser downloads
+/data/Unconfirmed*
+
 # Heavy raw datasets
 /data/raw/*.csv
 /data/raw/*.csv.7z
