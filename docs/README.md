@@ -12,11 +12,12 @@ Nếu cần hiểu hệ thống canonical:
 
 1. `system_description/kkbox_feature_catalog.md`
 2. `system_description/project_desc.md`
-3. `architecture_diagrams/architecture.md`
-4. `system_description/tab1_data_strategy.md`
-5. `system_description/kkbox_tab2_predictive_pipeline.md`
-6. `system_description/predictive.md`
-7. `system_description/prescriptive.md`
+3. `system_description/project_completion_plan.md`
+4. `architecture_diagrams/architecture.md`
+5. `system_description/tab1_data_strategy.md`
+6. `system_description/kkbox_tab2_predictive_pipeline.md`
+7. `system_description/predictive.md`
+8. `system_description/prescriptive.md`
 
 Nếu cần viết báo cáo và làm slide:
 
@@ -29,6 +30,7 @@ Nếu cần viết báo cáo và làm slide:
 
 - Feature semantics và snapshot logic: `system_description/kkbox_feature_catalog.md`
 - Product scope, maturity, và conflict đang mở: `system_description/project_desc.md`
+- Kế hoạch hoàn thiện dự án: `system_description/project_completion_plan.md`
 - Runtime architecture: `architecture_diagrams/architecture.md`
 - Tab 2 train/score contract: `system_description/kkbox_tab2_predictive_pipeline.md`
 - Tab 2 business narrative grounded: `system_description/predictive.md`
