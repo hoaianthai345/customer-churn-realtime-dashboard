@@ -29,8 +29,13 @@ diagram.xml
 # Generated outputs
 /artifacts/
 /data/artifacts/
+/data/artifacts_tab*/
 /data/processed/
 /data/results.zip
+
+# Any heavy parquet/csv outputs anywhere in repo
+*.parquet
+*.csv
 
 # Accidental browser downloads
 /data/Unconfirmed*
@@ -40,6 +45,7 @@ diagram.xml
 /data/raw/*.csv.7z
 /data/raw/*.7z
 /data/raw/*.parquet
+
 
 # Keep lightweight references and samples
 !/data/raw/WSDMChurnLabeller.scala
