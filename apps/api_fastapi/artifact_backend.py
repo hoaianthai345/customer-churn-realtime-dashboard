@@ -688,6 +688,33 @@ def _load_tab1_km_curves(tab1_dir: Path) -> pd.DataFrame:
     return read_parquet_copy(tab1_dir / "tab1_km_curves.parquet")
 
 
+def _load_tab1_trend_monthly_summary_df(tab1_dir: Path) -> pd.DataFrame:
+    path = tab1_dir / "trend_monthly_summary.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return read_parquet_copy(path)
+
+
+def _load_tab1_snapshot_risk_heatmap_df(tab1_dir: Path) -> pd.DataFrame:
+    path = tab1_dir / "snapshot_risk_heatmap_all.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return read_parquet_copy(path)
+
+
+def _load_tab2_executive_value_risk_matrix_df(tab2_dir: Path, target_month: int) -> pd.DataFrame:
+    path = tab2_dir / f"tab2_executive_value_risk_matrix_{target_month}.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    return read_parquet_copy(path)
+
+
+def _frame_series_or_default(frame: pd.DataFrame, column: str, default: Any) -> pd.Series:
+    if column in frame.columns:
+        return frame[column]
+    return pd.Series(default, index=frame.index)
+
+
 def _coerce_rate_pct(value: Any) -> float:
     numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     if pd.isna(numeric):
@@ -782,6 +809,154 @@ def _build_tab1_monthly_trend_from_feature_store(
             }
         )
     return rows
+
+
+def _normalize_tab1_precomputed_monthly_trend(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    work = df.copy()
+    target_month = pd.to_numeric(_frame_series_or_default(work, "target_month", np.nan), errors="coerce").astype("Int64")
+    work = work.assign(target_month=target_month).dropna(subset=["target_month"]).copy()
+    if work.empty:
+        return []
+
+    work["target_month"] = work["target_month"].astype("int32")
+    work = work.loc[~work["target_month"].isin(TAB1_EXCLUDED_TREND_MONTHS)].copy()
+    if work.empty:
+        return []
+
+    work["month_label"] = _frame_series_or_default(work, "month_label", "").astype(str)
+    work["month_label"] = work["month_label"].where(work["month_label"].str.len() > 0, work["target_month"].map(yyyymm_to_label))
+    work["total_expiring_users"] = pd.to_numeric(
+        _frame_series_or_default(work, "total_expiring_users", _frame_series_or_default(work, "subscribers", 0)),
+        errors="coerce",
+    ).fillna(0).astype(int)
+    work["historical_churn_rate"] = pd.to_numeric(
+        _frame_series_or_default(work, "historical_churn_rate", _frame_series_or_default(work, "churn_rate", 0.0)),
+        errors="coerce",
+    ).fillna(0.0)
+    low_mask = work["historical_churn_rate"].between(0.0, 1.0, inclusive="both")
+    work.loc[low_mask, "historical_churn_rate"] = work.loc[low_mask, "historical_churn_rate"] * 100.0
+    work["overall_median_survival"] = pd.to_numeric(
+        _frame_series_or_default(work, "overall_median_survival", _frame_series_or_default(work, "median_survival_days_proxy", 0.0)),
+        errors="coerce",
+    ).fillna(0.0)
+    work["auto_renew_rate"] = pd.to_numeric(_frame_series_or_default(work, "auto_renew_rate", 0.0), errors="coerce").fillna(0.0)
+    auto_mask = work["auto_renew_rate"].between(0.0, 1.0, inclusive="both")
+    work.loc[auto_mask, "auto_renew_rate"] = work.loc[auto_mask, "auto_renew_rate"] * 100.0
+    work["total_expected_renewal_amount"] = pd.to_numeric(
+        _frame_series_or_default(work, "total_expected_renewal_amount", _frame_series_or_default(work, "revenue", np.nan)),
+        errors="coerce",
+    )
+    work["apru"] = pd.to_numeric(_frame_series_or_default(work, "apru", np.nan), errors="coerce")
+    apru_mask = work["apru"].isna() & work["total_expected_renewal_amount"].notna() & (work["total_expiring_users"] > 0)
+    work.loc[apru_mask, "apru"] = work.loc[apru_mask, "total_expected_renewal_amount"] / work.loc[apru_mask, "total_expiring_users"]
+    work["new_paid_users"] = pd.to_numeric(_frame_series_or_default(work, "new_paid_users", np.nan), errors="coerce")
+    work["churned_users"] = pd.to_numeric(_frame_series_or_default(work, "churned_users", np.nan), errors="coerce")
+    churned_mask = work["churned_users"].isna()
+    work.loc[churned_mask, "churned_users"] = np.round(
+        work.loc[churned_mask, "total_expiring_users"] * work.loc[churned_mask, "historical_churn_rate"] / 100.0
+    )
+    work["net_movement"] = pd.to_numeric(_frame_series_or_default(work, "net_movement", np.nan), errors="coerce")
+    net_mask = work["net_movement"].isna() & work["new_paid_users"].notna()
+    work.loc[net_mask, "net_movement"] = work.loc[net_mask, "new_paid_users"] - work.loc[net_mask, "churned_users"]
+
+    ordered = work.sort_values("target_month").reset_index(drop=True)
+    rows: list[dict[str, Any]] = []
+    for row in ordered.itertuples(index=False):
+        total_expected_renewal_amount = getattr(row, "total_expected_renewal_amount", np.nan)
+        rows.append(
+            {
+                "target_month": int(getattr(row, "target_month")),
+                "month_label": str(getattr(row, "month_label")),
+                "total_expiring_users": int(getattr(row, "total_expiring_users", 0) or 0),
+                "historical_churn_rate": float(getattr(row, "historical_churn_rate", 0.0) or 0.0),
+                "overall_median_survival": float(getattr(row, "overall_median_survival", 0.0) or 0.0),
+                "auto_renew_rate": float(getattr(row, "auto_renew_rate", 0.0) or 0.0),
+                "total_expected_renewal_amount": None if pd.isna(total_expected_renewal_amount) else float(total_expected_renewal_amount),
+                "apru": None if pd.isna(getattr(row, "apru", np.nan)) else float(getattr(row, "apru")),
+                "new_paid_users": None if pd.isna(getattr(row, "new_paid_users", np.nan)) else int(round(float(getattr(row, "new_paid_users")))),
+                "churned_users": None if pd.isna(getattr(row, "churned_users", np.nan)) else int(round(float(getattr(row, "churned_users")))),
+                "net_movement": None if pd.isna(getattr(row, "net_movement", np.nan)) else int(round(float(getattr(row, "net_movement")))),
+            }
+        )
+    return rows
+
+
+def _normalize_tab1_precomputed_risk_heatmap(df: pd.DataFrame, target_month: int) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    work = df.copy()
+    if "target_month" in work.columns:
+        scoped_month = pd.to_numeric(work["target_month"], errors="coerce").astype("Int64")
+        work = work.assign(target_month=scoped_month)
+        work = work.loc[work["target_month"] == target_month].copy()
+    if work.empty:
+        return []
+
+    if "risk_customer_segment" in work.columns and "risk_segment" not in work.columns:
+        work = work.rename(columns={"risk_customer_segment": "risk_segment"})
+    if "subscribers" in work.columns and "users" not in work.columns:
+        work = work.rename(columns={"subscribers": "users"})
+    if "value_tier" not in work.columns or "risk_segment" not in work.columns:
+        return []
+
+    work["users"] = pd.to_numeric(_frame_series_or_default(work, "users", 0), errors="coerce").fillna(0).astype(int)
+    grouped = (
+        work.groupby(["value_tier", "risk_segment"], as_index=False)
+        .agg(users=("users", "sum"))
+        .set_index(["value_tier", "risk_segment"])
+        .reindex(
+            pd.MultiIndex.from_product(
+                [TAB1_VISIBLE_VALUE_TIERS, TAB1_RISK_SEGMENT_ORDER],
+                names=["value_tier", "risk_segment"],
+            ),
+            fill_value=0,
+        )
+        .reset_index()
+    )
+    grouped["users"] = grouped["users"].astype(int)
+    return grouped.to_dict(orient="records")
+
+
+def _normalize_tab2_executive_value_risk_matrix(df: pd.DataFrame, target_month: int) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    work = df.copy()
+    if "target_month" in work.columns:
+        scoped_month = pd.to_numeric(work["target_month"], errors="coerce").astype("Int64")
+        work = work.assign(target_month=scoped_month)
+        work = work.loc[work["target_month"] == target_month].copy()
+    if work.empty:
+        return []
+
+    work["prob_bin"] = pd.to_numeric(_frame_series_or_default(work, "prob_bin", 0.0), errors="coerce").fillna(0.0)
+    work["expected_renewal_amount"] = pd.to_numeric(_frame_series_or_default(work, "expected_renewal_amount", 0.0), errors="coerce").fillna(0.0)
+    work["user_count"] = pd.to_numeric(_frame_series_or_default(work, "user_count", 0), errors="coerce").fillna(0).astype(int)
+    work["revenue_at_risk"] = pd.to_numeric(_frame_series_or_default(work, "revenue_at_risk", 0.0), errors="coerce").fillna(0.0)
+    if "risk_tier" not in work.columns and "risk_band" in work.columns:
+        work["risk_tier"] = _to_executive_risk_band(work["risk_band"])
+    if "display_size" not in work.columns:
+        work["display_size"] = np.sqrt(work["user_count"].clip(lower=1)).astype("float64")
+
+    return (
+        work[
+            [
+                "prob_bin",
+                "expected_renewal_amount",
+                "risk_band",
+                "risk_tier",
+                "user_count",
+                "revenue_at_risk",
+                "display_size",
+            ]
+        ]
+        .sort_values(["prob_bin", "expected_renewal_amount", "user_count"], ascending=[True, True, False])
+        .to_dict(orient="records")
+    )
 
 
 def _build_tab1_monthly_trend_from_kpis(
@@ -1072,7 +1247,12 @@ def build_tab1_descriptive_payload(
     dimension_col = _tab1_dimension_column(dimension)
     monthly_kpis = _load_tab1_monthly_kpis(tab1_dir)
     monthly_row = monthly_kpis[monthly_kpis["target_month"] == target_month]
-    monthly_trend = _build_tab1_monthly_trend_from_kpis(
+    precomputed_trend = (
+        _normalize_tab1_precomputed_monthly_trend(_load_tab1_trend_monthly_summary_df(tab1_dir))
+        if not segment_type and not segment_value
+        else []
+    )
+    monthly_trend = precomputed_trend or _build_tab1_monthly_trend_from_kpis(
         tab1_dir,
         monthly_kpis,
         root_hint=root_hint,
@@ -1177,7 +1357,12 @@ def build_tab1_descriptive_payload(
         auto_renew_rate = float(work["is_auto_renew"].mean() * 100.0)
 
     churn_breakdown = _build_tab1_churn_breakdown(total_expiring_users, historical_churn_rate)
-    risk_heatmap = _build_tab1_risk_heatmap(work)
+    precomputed_risk_heatmap = (
+        _normalize_tab1_precomputed_risk_heatmap(_load_tab1_snapshot_risk_heatmap_df(tab1_dir), target_month)
+        if not segment_type and not segment_value
+        else []
+    )
+    risk_heatmap = precomputed_risk_heatmap or _build_tab1_risk_heatmap(work)
 
     return {
         "meta": {
@@ -2026,7 +2211,12 @@ def build_tab2_predictive_payload(
     filtered_scored = _filter_by_segment(scored_df, segment_type, segment_value)
 
     matrix_rows = _build_predictive_matrix_from_segment_summary(filtered_summary)
-    executive_matrix_rows = _build_executive_value_risk_matrix(filtered_scored)
+    precomputed_executive_matrix = (
+        _normalize_tab2_executive_value_risk_matrix(_load_tab2_executive_value_risk_matrix_df(tab2_dir, target_month), target_month)
+        if not segment_type and not segment_value
+        else []
+    )
+    executive_matrix_rows = precomputed_executive_matrix or _build_executive_value_risk_matrix(filtered_scored)
     current_kpis = _compute_predictive_kpis(filtered_scored, matrix_rows)
 
     previous_month = previous_yyyymm(target_month)

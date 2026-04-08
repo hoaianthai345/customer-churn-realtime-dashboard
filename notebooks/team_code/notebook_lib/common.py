@@ -42,7 +42,7 @@ def resolve_feature_store_dir(
 
     if root_hint is not None:
         root_hint = Path(root_hint)
-        candidates.extend([root_hint, root_hint / "feature_store"])
+        candidates.extend([root_hint, root_hint / "feature_store", root_hint / "data" / "artifacts" / "feature_store"])
 
     candidates.extend(
         [
@@ -55,6 +55,7 @@ def resolve_feature_store_dir(
         ]
     )
     candidates.extend(build_upward_candidates(base_dir, ("artifacts", "feature_store")))
+    candidates.extend(build_upward_candidates(base_dir, ("data", "artifacts", "feature_store")))
     candidates.extend(build_upward_candidates(base_dir, ("feature_store",)))
 
     seen: set[Path] = set()
@@ -89,7 +90,7 @@ def resolve_tab2_artifacts_dir(
 
     if root_hint is not None:
         root_hint = Path(root_hint)
-        candidates.extend([root_hint, root_hint / "artifacts_tab2_predictive"])
+        candidates.extend([root_hint, root_hint / "artifacts_tab2_predictive", root_hint / "data" / "artifacts_tab2_predictive"])
 
     candidates.extend(
         [
@@ -100,6 +101,7 @@ def resolve_tab2_artifacts_dir(
         ]
     )
     candidates.extend(build_upward_candidates(base_dir, ("artifacts_tab2_predictive",)))
+    candidates.extend(build_upward_candidates(base_dir, ("data", "artifacts_tab2_predictive")))
     candidates.extend(build_upward_candidates(base_dir, ("artifacts", "tab2_predictive")))
 
     seen: set[Path] = set()
@@ -114,6 +116,53 @@ def resolve_tab2_artifacts_dir(
     required = ", ".join(required_files)
     raise FileNotFoundError(
         f"Khong tim thay Tab 2 predictive artifacts. Can cac file: {required}."
+    )
+
+
+def resolve_tab1_artifacts_dir(
+    root_hint: str | Path | None = None,
+    score_month: int = 201704,
+    required_files: Sequence[str] | None = None,
+) -> Path:
+    if required_files is None:
+        required_files = (
+            f"tab1_snapshot_{score_month}.parquet",
+            "tab1_kpis_monthly.parquet",
+            "tab1_km_curves.parquet",
+            "manifest.json",
+        )
+
+    base_dir = discover_project_dir()
+    candidates: list[Path] = []
+
+    if root_hint is not None:
+        root_hint = Path(root_hint)
+        candidates.extend([root_hint, root_hint / "artifacts_tab1_descriptive", root_hint / "data" / "artifacts_tab1_descriptive"])
+
+    candidates.extend(
+        [
+            Path("/kaggle/input/kkbox-tab1-descriptive"),
+            Path("/kaggle/input/kkbox-tab1-descriptive/artifacts_tab1_descriptive"),
+            Path("/kaggle/input/kkbox-tab1-descriptive-artifacts"),
+            Path("/kaggle/input/kkbox-tab1-descriptive-artifacts/artifacts_tab1_descriptive"),
+        ]
+    )
+    candidates.extend(build_upward_candidates(base_dir, ("artifacts_tab1_descriptive",)))
+    candidates.extend(build_upward_candidates(base_dir, ("data", "artifacts_tab1_descriptive")))
+    candidates.extend(build_upward_candidates(base_dir, ("artifacts", "tab1_descriptive")))
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate in seen or not candidate.exists():
+            continue
+        seen.add(candidate)
+        if all((candidate / name).exists() for name in required_files):
+            return candidate
+
+    required = ", ".join(required_files)
+    raise FileNotFoundError(
+        f"Khong tim thay Tab 1 descriptive artifacts. Can cac file: {required}."
     )
 
 
