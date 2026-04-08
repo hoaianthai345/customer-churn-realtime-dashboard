@@ -2,15 +2,7 @@
 
   🚀 KKBox Real-time Customer Churn BI Dashboard
 
-  ![Live Demo
-  (https://img.shields.io/badge/Demo-Vercel-blue?style=for-the-badge&logo=vercel)](https://customer-ch
-  urn-realtime-dashboard.vercel.app/)
-  ![Backend
-  (https://img.shields.io/badge/Backend-AWS-orange?style=for-the-badge&logo=amazon-aws)](https://custo
-  mer-churn-realtime-dashboard.vercel.app/)
-  ![Stack
-  (https://img.shields.io/badge/Stack-Spark--Kafka--ClickHouse--FastAPI-green?style=for-the-badge)](ht
-  tps://github.com/anhoai/project-realtime-bi)
+  https://customer-churn-realtime-dashboard.vercel.app
 
   Hệ thống Near Real-time Business Intelligence (BI) chuyên sâu cho bài toán dự báo và phân tích tỷ lệ
   rời bỏ khách hàng (Churn) của dịch vụ âm nhạc KKBox. Dự án kết hợp sức mạnh của Big Data Streaming
