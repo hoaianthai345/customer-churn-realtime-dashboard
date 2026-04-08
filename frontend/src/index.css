@@ -1,0 +1,133 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 196 33% 97%;
+    --foreground: 219 36% 13%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 219 36% 13%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 219 36% 13%;
+
+    --primary: 187 78% 33%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 204 25% 93%;
+    --secondary-foreground: 215 23% 28%;
+
+    --muted: 210 18% 93%;
+    --muted-foreground: 215 13% 47%;
+
+    --accent: 189 81% 94%;
+    --accent-foreground: 189 78% 22%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 154 62% 34%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 100%;
+
+    --risk-high: 0 72% 56%;
+    --risk-medium: 38 92% 50%;
+    --risk-low: 152 60% 40%;
+
+    --border: 210 24% 87%;
+    --input: 210 24% 87%;
+    --ring: 187 78% 33%;
+
+    --radius: 0.75rem;
+
+    --chart-teal: 187 78% 33%;
+    --chart-teal-light: 187 52% 70%;
+    --chart-blue: 215 76% 56%;
+    --chart-indigo: 234 62% 58%;
+    --chart-emerald: 152 60% 40%;
+    --chart-amber: 38 92% 50%;
+    --chart-red: 0 72% 56%;
+    --chart-slate: 215 16% 47%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 215 25% 27%;
+    --sidebar-primary: 187 78% 33%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 189 81% 94%;
+    --sidebar-accent-foreground: 189 78% 22%;
+    --sidebar-border: 214 20% 92%;
+    --sidebar-ring: 187 78% 33%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: "Manrope", system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(circle at top left, rgba(34, 211, 238, 0.14), transparent 28%),
+      radial-gradient(circle at top right, rgba(14, 165, 233, 0.1), transparent 22%);
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.18);
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply bg-card border border-border/60 shadow-sm backdrop-blur-sm;
+  }
+  .kpi-glow {
+    box-shadow: 0 0 20px -5px hsl(var(--primary) / 0.15);
+  }
+  .chart-container {
+    @apply glass-card rounded-xl p-5;
+  }
+  .insight-highlight {
+    @apply border-l-4 border-primary bg-accent/50 rounded-r-lg px-4 py-3;
+  }
+  .tab-active {
+    @apply text-primary border-b-2 border-primary font-semibold;
+  }
+  .skeleton-pulse {
+    @apply animate-pulse bg-muted rounded;
+  }
+
+  .font-display {
+    font-family: "Space Grotesk", "Manrope", system-ui, sans-serif;
+  }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes countUp {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+.animate-fade-in-up-delay-1 { animation-delay: 0.1s; }
+.animate-fade-in-up-delay-2 { animation-delay: 0.2s; }
+.animate-fade-in-up-delay-3 { animation-delay: 0.3s; }
+.animate-fade-in-up-delay-4 { animation-delay: 0.4s; }

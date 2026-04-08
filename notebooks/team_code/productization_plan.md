@@ -222,7 +222,7 @@ Tranh tinh trang cung ten metric nhung khac nghia du lieu.
 - batch view va realtime view co the so sanh dung
 - giam risk lech nghiep vu khi viet bao cao va demo
 
-## 9. Pha 7: Noi UI Next.js vao payload that
+## 9. Pha 7: Noi dashboard frontend vao payload that
 
 ### Muc tieu
 
@@ -230,7 +230,7 @@ UI phai phan anh dung maturity cua he thong.
 
 ### Viec can lam
 
-- Sua `project-realtime-bi/apps/web_next/app/page.tsx`:
+- Sua `project-realtime-bi/frontend/src/pages/Index.tsx` va `project-realtime-bi/frontend/src/hooks/useDashboardData.ts`:
 - Tab 2 dung API model-backed
 - Tab 3 dung API simulation moi
 - wording tren UI phu hop voi data that
@@ -243,7 +243,7 @@ UI phai phan anh dung maturity cua he thong.
 
 ### Dau ra
 
-- Dashboard Next.js hien thi 3 tab day du va dung contract
+- Dashboard frontend hien thi 3 tab day du va dung contract
 
 ## 10. Pha 8: Gan vao one-command pipeline
 
@@ -327,7 +327,7 @@ Neu muon dat duoc san pham hoan chinh nhanh nhat, nen lam theo thu tu:
 3. Sua API Tab 2 sang model-backed
 4. Noi Tab 3 vao baseline Tab 2
 5. Don lai scope Tab 1
-6. Sua UI Next.js
+6. Sua UI frontend
 7. Cap nhat script pipeline va validate
 8. Them test
 9. Chot docs

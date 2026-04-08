@@ -95,7 +95,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: infra/next/Dockerfile
+      dockerfile: infra/frontend/Dockerfile
     container_name: realtime-bi-web
     depends_on:
       - api
@@ -104,16 +104,14 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-      NEXT_PUBLIC_WS_BASE_URL: ws://localhost:8000
+      VITE_API_BASE_URL: /backend
+      VITE_PROXY_TARGET: http://api:8000
     volumes:
       - ./:/opt/project
-      - web_node_modules:/opt/project/apps/web_next/node_modules
-      - web_next_cache:/opt/project/apps/web_next/.next
-    working_dir: /opt/project/apps/web_next
-    command: ["/bin/sh", "-c", "npm install --no-audit --prefer-offline && mkdir -p .next && find .next -mindepth 1 -exec rm -rf {} + && npm run dev -- --hostname 0.0.0.0 --port 3000"]
+      - web_node_modules:/opt/project/frontend/node_modules
+    working_dir: /opt/project/frontend
+    command: ["/bin/sh", "-c", "npm install --no-audit --prefer-offline && npm run dev -- --host 0.0.0.0 --port 3000"]
 
 volumes:
   clickhouse_data:
   web_node_modules:
-  web_next_cache:

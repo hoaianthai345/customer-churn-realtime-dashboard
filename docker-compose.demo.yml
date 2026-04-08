@@ -1,0 +1,45 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: infra/fastapi/Dockerfile.demo
+    env_file:
+      - .env
+    environment:
+      FEATURE_STORE_DIR: /opt/project/data/artifacts/feature_store
+      TAB1_ARTIFACTS_DIR: /opt/project/data/artifacts_tab1_descriptive
+      TAB2_ARTIFACTS_DIR: /opt/project/data/artifacts_tab2_predictive
+      TAB3_ARTIFACTS_DIR: /opt/project/data/artifacts_tab3_prescriptive
+      TAB3_MONTE_CARLO_ARTIFACTS_DIR: /opt/project/data/artifacts_tab3_monte_carlo
+      CLICKHOUSE_HOST: clickhouse-disabled
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/opt/project
+    working_dir: /opt/project
+    command: ["uvicorn", "apps.api_fastapi.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/frontend/Dockerfile
+    depends_on:
+      - api
+    env_file:
+      - .env
+    environment:
+      VITE_API_BASE_URL: /backend
+      VITE_PROXY_TARGET: http://host.docker.internal:8000
+      VITE_DEMO_MODE: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/opt/project
+      - web_node_modules_demo:/opt/project/frontend/node_modules
+    working_dir: /opt/project/frontend
+    command: ["/bin/sh", "-c", "npm install --no-audit --prefer-offline && npm run dev -- --host 0.0.0.0 --port 3000"]
+
+volumes:
+  web_node_modules_demo:

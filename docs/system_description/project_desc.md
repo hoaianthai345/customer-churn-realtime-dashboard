@@ -20,7 +20,7 @@ Day la mot he thong near real-time BI cho bai toan churn cua KKBOX, ket hop:
 - offline feature engineering tren du lieu goc KKBOX;
 - replay streaming cho `user_logs`;
 - Spark + ClickHouse cho serving layer;
-- FastAPI + Next.js cho dashboard.
+- FastAPI + frontend dashboard cho dashboard.
 
 ## 3. Nguon su that va thu tu uu tien
 
@@ -75,11 +75,11 @@ Stack canonical cua repo:
 - Spark Structured Streaming
 - ClickHouse
 - FastAPI
-- Next.js
+- Vite React dashboard
 
 Luong xu ly tong quat:
 
-`Batch preload (members + transactions) -> replay user logs -> Kafka -> Spark -> ClickHouse -> FastAPI -> Next.js`
+`Batch preload (members + transactions) -> replay user logs -> Kafka -> Spark -> ClickHouse -> FastAPI -> frontend dashboard`
 
 Luu y quan trong:
 
@@ -224,7 +224,7 @@ Vi vay:
 
 ### 8.1. Da grounded va nen uu tien giu dong bo
 
-- runtime stack Kafka + Spark + ClickHouse + FastAPI + Next.js
+- runtime stack Kafka + Spark + ClickHouse + FastAPI + frontend dashboard
 - luong replay `user_logs`
 - Tab 1 serving table va API
 - offline feature catalog tu notebook batch
@@ -307,7 +307,7 @@ Nhung implementation hien tai moi chac chan o muc:
 - `docs/report_and_slides/kkbox_report_diagrams.md`: inventory diagram cho bao cao va slide
 - `apps/api_fastapi/main.py`: API va logic proxy cho Tab 2 / Tab 3
 - `apps/batch/materialize_tab1_realtime.py`: realtime Tab 1 materialization
-- `apps/web_next/app/page.tsx`: UI dashboard canonical
+- `frontend/src/pages/Index.tsx`: UI dashboard canonical
 - `../infiniteWing/KKBOX churn/train_churn_pipeline.ipynb`: offline batch feature engineering notebook
 - `../infiniteWing/KKBOX churn/train_churn_pipeline_fix_report.md`: ghi chu cac fix nghiep vu va data-quality
 

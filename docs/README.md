@@ -26,6 +26,12 @@ Nếu cần viết báo cáo và làm slide:
 3. `report_and_slides/demo_script.md`
 4. đối chiếu lại terminology với `system_description/kkbox_feature_catalog.md`
 
+Nếu cần chạy demo ngay:
+
+1. `../scripts/run_demo.sh`
+2. `../scripts/validate_demo.sh`
+3. `report_and_slides/demo_script.md`
+
 ## File Canonical
 
 - Feature semantics và snapshot logic: `system_description/kkbox_feature_catalog.md`

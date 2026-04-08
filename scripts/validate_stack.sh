@@ -42,5 +42,5 @@ echo "Replay status:"
 curl -fsS http://localhost:8000/api/v1/replay/status || true
 
 echo
-echo "Next.js health check:"
+echo "Frontend dashboard health check:"
 curl -fsSI http://localhost:3000 | head -n 1 || true

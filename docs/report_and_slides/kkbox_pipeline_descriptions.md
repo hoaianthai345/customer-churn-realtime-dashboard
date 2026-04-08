@@ -32,7 +32,7 @@ Day la stack chay san pham trong repo:
 - Spark Structured Streaming
 - ClickHouse
 - FastAPI
-- Next.js
+- frontend dashboard
 
 Boundary nay grounded nhat o Tab 1.
 Tab 2 va Tab 3 trong app runtime van can duoc xem la surface san pham / huong tich hop, khong nen ve nhu da noi truc tiep model artifact vao production neu implementation do chua xong.
@@ -95,7 +95,7 @@ sau do:
 
 `Feature store canonical + ClickHouse serving`
 -> `FastAPI`
--> `Next.js dashboard`
+-> `frontend dashboard`
 -> `Tab 1 / Tab 2 / Tab 3`
 
 ### Y nghia tung box
@@ -106,7 +106,7 @@ sau do:
 - `members + transactions preload`: preload static data vao serving layer.
 - `user_logs replay`: mo phong near real-time.
 - `Kafka -> Spark -> ClickHouse`: lop serving cho dashboard.
-- `FastAPI -> Next.js`: lop API va giao dien.
+- `FastAPI -> frontend dashboard`: lop API va giao dien.
 - `Tab 1 / Tab 2 / Tab 3`: ba mat san pham.
 
 ### Note can ghi tren hinh
@@ -279,7 +279,7 @@ Hop:
 -> `Batch materializer`
 -> `realtime_bi.tab1_descriptive_member_monthly`
 -> `FastAPI`
--> `Next.js dashboard`
+-> `frontend dashboard`
 
 ### Y nghia nghiep vu
 
@@ -524,7 +524,7 @@ Ve 3 cot:
 
 #### Cot 1. `Grounded in runtime`
 
-- Kafka -> Spark -> ClickHouse -> FastAPI -> Next.js
+- Kafka -> Spark -> ClickHouse -> FastAPI -> frontend dashboard
 - Tab 1 serving table
 - Tab 1 API va dashboard
 

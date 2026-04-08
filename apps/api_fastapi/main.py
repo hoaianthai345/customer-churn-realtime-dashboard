@@ -10,7 +10,7 @@ import threading
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import clickhouse_connect
@@ -18,7 +18,11 @@ from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnec
 from fastapi.middleware.cors import CORSMiddleware
 
 from .artifact_backend import (
+    available_tab1_months,
     available_tab2_months,
+    available_tab3_months,
+    build_dashboard_snapshot_payload,
+    build_tab1_descriptive_payload,
     build_tab2_predictive_payload,
     build_tab3_prescriptive_payload,
 )
@@ -94,6 +98,19 @@ def _mode_or_default(values: Iterable[str], default: str = "Unknown") -> str:
     if not counted:
         return default
     return counted.most_common(1)[0][0]
+
+
+def _cors_origins_from_env() -> list[str]:
+    raw = os.getenv("API_CORS_ORIGINS")
+    if raw:
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    return [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://0.0.0.0:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ]
 
 
 @dataclass(frozen=True)
@@ -878,6 +895,8 @@ def _build_tab3_prescriptive(
 
 def _get_clickhouse_client():
     env_host = os.getenv("CLICKHOUSE_HOST", "").strip()
+    if env_host.lower() in {"disabled", "clickhouse-disabled", "none", "artifact-only"}:
+        raise RuntimeError("ClickHouse is disabled by configuration")
     hosts = [host for host in [env_host, "clickhouse", "localhost"] if host]
     unique_hosts: List[str] = []
     for host in hosts:
@@ -932,6 +951,10 @@ def _query_first_row_safe(sql: str) -> Dict[str, Any]:
         return {}
 
 
+def _clickhouse_disabled() -> bool:
+    return os.getenv("CLICKHOUSE_HOST", "").strip().lower() in {"disabled", "clickhouse-disabled", "none", "artifact-only"}
+
+
 def _month_bounds(year: Optional[int], month: Optional[int]) -> Tuple[date, date]:
     if year is not None and month is not None:
         start = _first_day_of_month(year, month)
@@ -945,7 +968,7 @@ def _month_bounds(year: Optional[int], month: Optional[int]) -> Tuple[date, date
     )
     latest_month = latest_row.get("latest_month")
     if latest_month is None:
-        today = datetime.now(UTC).date()
+        today = datetime.now(timezone.utc).date()
         start = _first_day_of_month(today.year, today.month)
         return start, _next_month_start(start)
 
@@ -1055,7 +1078,7 @@ _REPLAY_STATE: Dict[str, Any] = {
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _validate_iso_date(value: str) -> str:
@@ -1349,8 +1372,8 @@ app = FastAPI(title="Realtime BI API", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("API_CORS_ORIGINS", "*").split(","),
-    allow_credentials=True,
+    allow_origins=_cors_origins_from_env(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1363,13 +1386,31 @@ def health() -> Dict[str, str]:
 
 @app.get("/api/v1/month-options")
 def month_options() -> Dict[str, Any]:
-    months = sorted(set(_load_month_options()).union(set(available_tab2_months())))
+    if _clickhouse_disabled():
+        artifact_month_sets = [
+            set(months)
+            for months in [available_tab1_months(), available_tab2_months(), available_tab3_months()]
+            if months
+        ]
+        if not artifact_month_sets:
+            months = []
+        elif len(artifact_month_sets) == 1:
+            months = sorted(artifact_month_sets[0])
+        else:
+            months = sorted(set.intersection(*artifact_month_sets))
+    else:
+        base_months = _load_month_options()
+        months = sorted(
+            set(base_months).union(set(available_tab1_months())).union(set(available_tab2_months()))
+        )
     return {"months": months}
 
 
 @app.get("/api/v1/tab1/month-options")
 def tab1_month_options() -> Dict[str, Any]:
-    return {"months": _load_tab1_month_options()}
+    base_months = [] if _clickhouse_disabled() else _load_tab1_month_options()
+    months = sorted(set(base_months).union(set(available_tab1_months())))
+    return {"months": months}
 
 
 @app.get("/api/v1/dashboard/snapshot")
@@ -1377,8 +1418,26 @@ def dashboard_snapshot(
     year: Optional[int] = Query(default=None, ge=2000, le=2100),
     month: Optional[int] = Query(default=None, ge=1, le=12),
 ) -> Dict[str, Any]:
-    snapshot = _build_snapshot(year, month)
-    return asdict(snapshot)
+    try:
+        if _clickhouse_disabled():
+            month_start, _ = _month_bounds(year, month)
+            return build_dashboard_snapshot_payload(month_start=month_start)
+        snapshot = _build_snapshot(year, month)
+        if (
+            snapshot.metrics.get("total_expiring_users", 0) <= 0
+            and not snapshot.revenue_series
+            and not snapshot.risk_series
+            and not snapshot.activity_series
+        ):
+            month_start, _ = _month_bounds(year, month)
+            return build_dashboard_snapshot_payload(month_start=month_start)
+        return asdict(snapshot)
+    except Exception:
+        try:
+            month_start, _ = _month_bounds(year, month)
+            return build_dashboard_snapshot_payload(month_start=month_start)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/tab1/descriptive")
@@ -1391,7 +1450,22 @@ def tab1_descriptive(
 ) -> Dict[str, Any]:
     try:
         month_start, _ = _month_bounds(year, month)
-        return _build_tab1_descriptive(month_start, dimension, segment_type, segment_value)
+        try:
+            return build_tab1_descriptive_payload(
+                month_start=month_start,
+                dimension=dimension,
+                segment_type=segment_type,
+                segment_value=segment_value,
+            )
+        except FileNotFoundError as exc:
+            if _clickhouse_disabled():
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            try:
+                return _build_tab1_descriptive(month_start, dimension, segment_type, segment_value)
+            except RuntimeError as runtime_exc:
+                if "ClickHouse is disabled by configuration" in str(runtime_exc):
+                    raise HTTPException(status_code=404, detail=str(exc)) from runtime_exc
+                raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1449,6 +1523,7 @@ def tab2_predictive(
                 month_start=month_start,
                 segment_type=segment_type,
                 segment_value=segment_value,
+                sample_limit=sample_limit,
             )
         except FileNotFoundError:
             return _build_tab2_predictive(month_start, segment_type, segment_value, sample_limit, params)
@@ -1462,6 +1537,7 @@ def tab3_prescriptive(
     month: Optional[int] = Query(default=None, ge=1, le=12),
     segment_type: Optional[str] = Query(default=None),
     segment_value: Optional[str] = Query(default=None),
+    scenario_id: Optional[str] = Query(default=None),
     sample_limit: int = Query(default=120000, ge=1000, le=400000),
     auto_shift_pct: float = Query(default=20.0, ge=0.0, le=100.0),
     upsell_shift_pct: float = Query(default=15.0, ge=0.0, le=100.0),
@@ -1512,6 +1588,8 @@ def tab3_prescriptive(
                 month_start=month_start,
                 segment_type=segment_type,
                 segment_value=segment_value,
+                scenario_id=scenario_id,
+                sample_limit=sample_limit,
                 auto_shift_pct=auto_shift_pct,
                 upsell_shift_pct=upsell_shift_pct,
                 skip_shift_pct=skip_shift_pct,

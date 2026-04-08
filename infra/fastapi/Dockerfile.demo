@@ -1,0 +1,8 @@
+FROM python:3.10-slim
+
+WORKDIR /opt/project
+
+COPY requirements.demo.txt /tmp/requirements.demo.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.demo.txt
+
+EXPOSE 8000

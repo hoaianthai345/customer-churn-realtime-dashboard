@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from calendar import monthrange
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 
 DEFAULT_MODEL_PARAMS: dict[str, float] = {
@@ -41,8 +44,110 @@ DEFAULT_SCENARIO_CONFIG: dict[str, float] = {
 }
 
 DEFAULT_SENSITIVITY_SHARES = [0.05, 0.10, 0.20, 0.30, 0.40, 0.50]
+DEFAULT_TAB3_SCENARIO_ID = "default"
 
 ALLOWED_SEGMENT_TYPES = {"price_segment", "loyalty_segment", "active_segment"}
+TAB1_DIMENSION_FIELD_MAP = {
+    "age": "age_segment",
+    "age_bucket": "age_segment",
+    "age_segment": "age_segment",
+    "gender": "gender_profile",
+    "gender_bucket": "gender_profile",
+    "gender_profile": "gender_profile",
+    "txn_freq": "txn_freq_bucket",
+    "txn_freq_bucket": "txn_freq_bucket",
+    "skip_ratio": "skip_ratio_bucket",
+    "skip_ratio_bucket": "skip_ratio_bucket",
+}
+TAB1_VISIBLE_VALUE_TIERS = ("Free Trial", "Deal Hunter", "Standard")
+TAB1_RISK_SEGMENT_ORDER = ("At Risk", "Watchlist", "Stable")
+TAB1_EXCLUDED_TREND_MONTHS = frozenset({201704})
+
+TAB2_EXECUTIVE_RISK_ORDER = ("High", "Medium", "Low", "Unknown")
+TAB2_EXECUTIVE_RISK_LONG_LABELS = {
+    "High": "High (Prob >= 0.6)",
+    "Medium": "Medium (Prob 0.4 - 0.6)",
+    "Low": "Low (Prob < 0.4)",
+    "Unknown": "Unknown",
+}
+TAB2_FEATURE_GROUP_LABELS = {
+    "segment_flags": "Dấu hiệu phân khúc",
+    "payment_value": "Thanh toán & giá trị",
+    "churn_history": "Lịch sử churn",
+    "listening_behavior": "Hành vi nghe",
+    "loyalty_member": "Vòng đời thành viên",
+    "other": "Tín hiệu khác",
+    "base_risk": "Nền rủi ro",
+}
+
+TAB2_SCORE_COLUMNS = (
+    "msno",
+    "target_month",
+    "bi_segment_name",
+    "renewal_segment",
+    "skip_segment",
+    "discovery_segment",
+    "price_segment",
+    "loyalty_segment",
+    "active_segment",
+    "rfm_segment",
+    "risk_band",
+    "churn_probability",
+    "expected_renewal_amount",
+    "expected_revenue_at_risk_30d",
+    "expected_retained_revenue_30d",
+)
+
+TAB3_SCORED_COLUMNS = (
+    "msno",
+    "target_month",
+    "risk_band",
+    "churn_probability",
+    "expected_renewal_amount",
+)
+
+TAB1_SNAPSHOT_DAILY_COLUMNS = (
+    "msno",
+    "churn_rate",
+    "survival_days_proxy",
+    "is_auto_renew",
+    "is_manual_renew",
+    "expire_day",
+    "expected_renewal_amount",
+    "actual_amount_paid",
+    "total_secs_sum",
+    "skip_ratio",
+    "discovery_ratio",
+    "high_skip_flag",
+    "low_discovery_flag",
+    "content_fatigue_flag",
+    "active_segment",
+)
+
+FEATURE_SNAPSHOT_COLUMNS = (
+    "msno",
+    "target_month",
+    "renewal_segment",
+    "price_segment",
+    "loyalty_segment",
+    "active_segment",
+    "skip_segment",
+    "discovery_segment",
+    "rfm_segment",
+    "bi_segment_name",
+    "is_auto_renew",
+    "is_manual_renew",
+    "deal_hunter_flag",
+    "free_trial_flag",
+    "high_skip_flag",
+    "low_discovery_flag",
+    "content_fatigue_flag",
+    "skip_ratio",
+    "discovery_ratio",
+    "expected_renewal_amount",
+    "amt_per_day",
+    "rfm_total_score",
+)
 
 
 def discover_project_root(start: Path | None = None) -> Path:
@@ -64,6 +169,7 @@ def _resolve_dir(
     root_hint: str | Path | None,
     required_files: Iterable[str],
     local_candidates: list[tuple[str, ...]],
+    preferred_files: Iterable[str] | None = None,
 ) -> Path:
     base_dir = discover_project_root()
     candidates: list[Path] = []
@@ -87,13 +193,23 @@ def _resolve_dir(
 
     seen: set[Path] = set()
     required = tuple(required_files)
+    preferred = tuple(preferred_files or ())
+    valid_candidates: list[Path] = []
     for candidate in candidates:
         candidate = candidate.resolve()
         if candidate in seen or not candidate.exists():
             continue
         seen.add(candidate)
         if all((candidate / name).exists() for name in required):
-            return candidate
+            valid_candidates.append(candidate)
+
+    if preferred:
+        for candidate in valid_candidates:
+            if all((candidate / name).exists() for name in preferred):
+                return candidate
+
+    if valid_candidates:
+        return valid_candidates[0]
 
     required_text = ", ".join(required)
     raise FileNotFoundError(f"Khong tim thay artifact dir can cac file: {required_text}")
@@ -136,6 +252,28 @@ def resolve_tab2_artifacts_dir(root_hint: str | Path | None = None, score_month:
     )
 
 
+def resolve_tab1_artifacts_dir(root_hint: str | Path | None = None, score_month: int = 201704) -> Path:
+    return _resolve_dir(
+        env_var="TAB1_ARTIFACTS_DIR",
+        root_hint=root_hint,
+        required_files=(
+            f"tab1_snapshot_{score_month}.parquet",
+            "tab1_kpis_monthly.parquet",
+            "tab1_km_curves.parquet",
+            "tab1_segment_mix.parquet",
+            "tab1_boredom_scatter.parquet",
+            "manifest.json",
+        ),
+        local_candidates=[
+            ("data", "artifacts_tab1_descriptive"),
+            ("data", "artifacts", "tab1_descriptive"),
+            ("artifacts", "tab1_descriptive"),
+            ("artifacts_tab1_descriptive",),
+            ("data", "artifacts", "_smoke_test", "tab1"),
+        ],
+    )
+
+
 def resolve_tab3_artifacts_dir(root_hint: str | Path | None = None, score_month: int = 201704) -> Path:
     return _resolve_dir(
         env_var="TAB3_ARTIFACTS_DIR",
@@ -146,22 +284,246 @@ def resolve_tab3_artifacts_dir(root_hint: str | Path | None = None, score_month:
             f"tab3_population_risk_shift_{score_month}.parquet",
         ),
         local_candidates=[
+            ("data", "artifacts_tab3_prescriptive 2"),
+            ("data", "artifacts", "tab3_prescriptive 2"),
+            ("artifacts", "tab3_prescriptive 2"),
+            ("artifacts_tab3_prescriptive 2",),
             ("data", "artifacts_tab3_prescriptive"),
             ("data", "artifacts", "tab3_prescriptive"),
             ("artifacts", "tab3_prescriptive"),
             ("artifacts_tab3_prescriptive",),
             ("data", "artifacts", "_smoke_test", "tab3"),
         ],
+        preferred_files=("scenario_catalog.json",),
     )
 
 
-@lru_cache(maxsize=32)
-def _read_parquet_cached(path_text: str) -> pd.DataFrame:
-    return pd.read_parquet(path_text)
+def resolve_tab3_monte_carlo_dir(root_hint: str | Path | None = None, score_month: int = 201704) -> Path:
+    return _resolve_dir(
+        env_var="TAB3_MONTE_CARLO_ARTIFACTS_DIR",
+        root_hint=root_hint,
+        required_files=(
+            f"tab3_monte_carlo_summary_{score_month}.json",
+            f"tab3_deterministic_summary_{score_month}.json",
+            "manifest.json",
+        ),
+        local_candidates=[
+            ("data", "artifacts_tab3_monte_carlo 2"),
+            ("data", "artifacts", "tab3_monte_carlo 2"),
+            ("artifacts", "tab3_monte_carlo 2"),
+            ("artifacts_tab3_monte_carlo 2",),
+            ("data", "artifacts_tab3_monte_carlo"),
+            ("data", "artifacts", "tab3_monte_carlo"),
+            ("artifacts", "tab3_monte_carlo"),
+            ("artifacts_tab3_monte_carlo",),
+            ("data", "artifacts", "_smoke_test", "tab3_monte_carlo"),
+        ],
+        preferred_files=("scenario_catalog.json",),
+    )
 
 
-def read_parquet_copy(path: str | Path) -> pd.DataFrame:
-    return _read_parquet_cached(str(Path(path).resolve())).copy()
+def _required_tab3_prescriptive_files(score_month: int) -> tuple[str, ...]:
+    return (
+        f"tab3_scenario_summary_{score_month}.json",
+        f"tab3_lever_summary_{score_month}.parquet",
+        f"tab3_population_risk_shift_{score_month}.parquet",
+    )
+
+
+def _required_tab3_monte_carlo_files(score_month: int) -> tuple[str, ...]:
+    return (
+        f"tab3_monte_carlo_summary_{score_month}.json",
+        f"tab3_deterministic_summary_{score_month}.json",
+        "manifest.json",
+    )
+
+
+def _normalize_scenario_id(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    normalized = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return normalized or text
+
+
+def _scenario_inputs_from_payload(
+    *,
+    scenario_config: dict[str, Any] | None = None,
+    scenario_inputs: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    if isinstance(scenario_inputs, dict):
+        return {
+            "auto_shift_pct": float(scenario_inputs.get("auto_shift_pct", 0.0) or 0.0),
+            "upsell_shift_pct": float(scenario_inputs.get("upsell_shift_pct", 0.0) or 0.0),
+            "skip_shift_pct": float(scenario_inputs.get("skip_shift_pct", 0.0) or 0.0),
+        }
+
+    config = scenario_config or {}
+    return {
+        "auto_shift_pct": float(config.get("manual_to_auto_share", 0.0) or 0.0) * 100.0,
+        "upsell_shift_pct": float(config.get("upsell_share", 0.0) or 0.0) * 100.0,
+        "skip_shift_pct": float(config.get("engagement_share", 0.0) or 0.0) * 100.0,
+    }
+
+
+def _load_tab3_scenario_catalog(root_dir: Path) -> dict[str, Any] | None:
+    path = root_dir / "scenario_catalog.json"
+    if not path.exists():
+        return None
+
+    payload = read_json_copy(path)
+    raw_scenarios = payload.get("scenarios")
+    if not isinstance(raw_scenarios, list):
+        return None
+
+    scenarios: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for raw_entry in raw_scenarios:
+        if not isinstance(raw_entry, dict):
+            continue
+        scenario_id = _normalize_scenario_id(
+            raw_entry.get("scenario_id") or raw_entry.get("id") or raw_entry.get("key")
+        )
+        if not scenario_id or scenario_id in seen_ids:
+            continue
+        seen_ids.add(scenario_id)
+
+        scenario_config = raw_entry.get("scenario_config")
+        scenario_inputs = raw_entry.get("scenario_inputs")
+        scenarios.append(
+            {
+                "scenario_id": scenario_id,
+                "label": str(raw_entry.get("label") or raw_entry.get("name") or scenario_id),
+                "description": str(raw_entry.get("description") or "").strip() or None,
+                "artifact_subdir": str(raw_entry.get("artifact_subdir") or ".").strip() or ".",
+                "monte_carlo_subdir": str(raw_entry.get("monte_carlo_subdir") or ".").strip() or ".",
+                "scenario_config": deepcopy(scenario_config) if isinstance(scenario_config, dict) else {},
+                "scenario_inputs": _scenario_inputs_from_payload(
+                    scenario_config=scenario_config if isinstance(scenario_config, dict) else None,
+                    scenario_inputs=scenario_inputs if isinstance(scenario_inputs, dict) else None,
+                ),
+            }
+        )
+
+    if not scenarios:
+        return None
+
+    default_scenario_id = _normalize_scenario_id(payload.get("default_scenario_id")) or scenarios[0]["scenario_id"]
+    if default_scenario_id not in seen_ids:
+        default_scenario_id = scenarios[0]["scenario_id"]
+
+    return {
+        "default_scenario_id": default_scenario_id,
+        "scenarios": scenarios,
+    }
+
+
+def _resolve_tab3_case_dir(
+    root_dir: Path,
+    *,
+    score_month: int,
+    scenario_id: str | None,
+    catalog: dict[str, Any] | None,
+    required_files: Iterable[str],
+    subdir_field: str,
+) -> tuple[Path, dict[str, Any] | None]:
+    if catalog is None:
+        normalized_id = _normalize_scenario_id(scenario_id)
+        if normalized_id and normalized_id != DEFAULT_TAB3_SCENARIO_ID:
+            raise ValueError(f"Scenario preset khong ton tai trong artifact catalog: {scenario_id}")
+        return root_dir, None
+
+    scenario_map = {
+        str(entry["scenario_id"]): entry for entry in catalog.get("scenarios", []) if isinstance(entry, dict)
+    }
+    selected_id = _normalize_scenario_id(scenario_id) or str(catalog.get("default_scenario_id") or DEFAULT_TAB3_SCENARIO_ID)
+    selected_entry = scenario_map.get(selected_id)
+    if selected_entry is None:
+        valid_ids = ", ".join(sorted(scenario_map.keys()))
+        raise ValueError(f"Scenario preset khong hop le: {scenario_id}. Co san: {valid_ids}")
+
+    subdir_text = str(selected_entry.get(subdir_field) or ".").strip() or "."
+    candidate_dir = root_dir if subdir_text in {".", "./"} else (root_dir / subdir_text).resolve()
+    if not all((candidate_dir / name).exists() for name in required_files):
+        raise FileNotFoundError(
+            f"Khong tim thay artifact cho scenario '{selected_id}' trong {candidate_dir}"
+        )
+    return candidate_dir, selected_entry
+
+
+def _build_tab3_scenario_options(
+    *,
+    selected_entry: dict[str, Any] | None,
+    selected_summary: dict[str, Any],
+    prescriptive_catalog: dict[str, Any] | None,
+    monte_carlo_catalog: dict[str, Any] | None,
+    monte_carlo_enabled: bool,
+) -> list[dict[str, Any]]:
+    if prescriptive_catalog is None:
+        return [
+            {
+                "scenario_id": DEFAULT_TAB3_SCENARIO_ID,
+                "label": "Default scenario",
+                "description": "Artifact preset mac dinh cho demo.",
+                "scenario_inputs": _scenario_inputs_from_payload(
+                    scenario_config=selected_summary.get("scenario_config")
+                    if isinstance(selected_summary.get("scenario_config"), dict)
+                    else None
+                ),
+                "is_default": True,
+                "has_monte_carlo": bool(monte_carlo_enabled),
+            }
+        ]
+
+    mc_ids = {
+        str(entry["scenario_id"])
+        for entry in (monte_carlo_catalog or {}).get("scenarios", [])
+        if isinstance(entry, dict) and entry.get("scenario_id")
+    }
+    default_id = str(prescriptive_catalog.get("default_scenario_id") or DEFAULT_TAB3_SCENARIO_ID)
+    rows: list[dict[str, Any]] = []
+    for entry in prescriptive_catalog.get("scenarios", []):
+        if not isinstance(entry, dict):
+            continue
+        scenario_id = str(entry.get("scenario_id") or "")
+        if not scenario_id:
+            continue
+        is_selected = selected_entry is not None and scenario_id == str(selected_entry.get("scenario_id"))
+        rows.append(
+            {
+                "scenario_id": scenario_id,
+                "label": str(entry.get("label") or scenario_id),
+                "description": entry.get("description"),
+                "scenario_inputs": deepcopy(entry.get("scenario_inputs") or {}),
+                "is_default": scenario_id == default_id,
+                "has_monte_carlo": scenario_id in mc_ids if monte_carlo_catalog is not None else bool(monte_carlo_enabled if is_selected else False),
+            }
+        )
+    return rows
+
+
+@lru_cache(maxsize=64)
+def _parquet_columns(path_text: str) -> tuple[str, ...]:
+    return tuple(pq.read_schema(path_text).names)
+
+
+@lru_cache(maxsize=64)
+def _read_parquet_cached(path_text: str, columns: tuple[str, ...] | None = None) -> pd.DataFrame:
+    kwargs: dict[str, Any] = {}
+    if columns:
+        kwargs["columns"] = list(columns)
+    return pd.read_parquet(path_text, **kwargs)
+
+
+def read_parquet_copy(path: str | Path, columns: Iterable[str] | None = None) -> pd.DataFrame:
+    resolved = str(Path(path).resolve())
+    selected_columns: tuple[str, ...] | None = None
+    if columns is not None:
+        available = set(_parquet_columns(resolved))
+        selected_columns = tuple(column for column in columns if column in available)
+        if not selected_columns:
+            raise ValueError(f"Khong tim thay cot nao trong parquet: {resolved}")
+    return _read_parquet_cached(resolved, selected_columns).copy()
 
 
 @lru_cache(maxsize=32)
@@ -171,6 +533,15 @@ def _read_json_cached(path_text: str) -> dict[str, Any]:
 
 def read_json_copy(path: str | Path) -> dict[str, Any]:
     return deepcopy(_read_json_cached(str(Path(path).resolve())))
+
+
+@lru_cache(maxsize=16)
+def _read_csv_cached(path_text: str) -> pd.DataFrame:
+    return pd.read_csv(path_text)
+
+
+def read_csv_copy(path: str | Path) -> pd.DataFrame:
+    return _read_csv_cached(str(Path(path).resolve())).copy()
 
 
 def month_start_to_yyyymm(month_start: date) -> int:
@@ -190,6 +561,52 @@ def yyyymm_to_label(target_month: int) -> str:
     return f"{text[:4]}-{text[4:6]}"
 
 
+def _cache_token(value: Any) -> str:
+    if value is None:
+        return "none"
+    text = str(value).strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return slug or "none"
+
+
+def _payload_cache_dir(artifact_dir: Path) -> Path:
+    return artifact_dir / "payload_cache"
+
+
+def _tab1_payload_cache_path(
+    artifact_dir: Path,
+    *,
+    target_month: int,
+    dimension: str,
+    segment_type: Optional[str],
+    segment_value: Optional[str],
+) -> Path:
+    return _payload_cache_dir(artifact_dir) / (
+        f"tab1_descriptive_{target_month}"
+        f"__dim-{_cache_token(dimension)}"
+        f"__seg-{_cache_token(segment_type)}"
+        f"__val-{_cache_token(segment_value)}.json"
+    )
+
+
+def _tab2_payload_cache_path(
+    artifact_dir: Path,
+    *,
+    target_month: int,
+    segment_type: Optional[str],
+    segment_value: Optional[str],
+) -> Path:
+    return _payload_cache_dir(artifact_dir) / (
+        f"tab2_predictive_{target_month}"
+        f"__seg-{_cache_token(segment_type)}"
+        f"__val-{_cache_token(segment_value)}.json"
+    )
+
+
+def _snapshot_payload_cache_path(artifact_dir: Path, *, target_month: int) -> Path:
+    return _payload_cache_dir(artifact_dir) / f"dashboard_snapshot_{target_month}.json"
+
+
 def available_tab2_months(root_hint: str | Path | None = None) -> list[str]:
     try:
         root = resolve_tab2_artifacts_dir(root_hint=root_hint)
@@ -203,15 +620,706 @@ def available_tab2_months(root_hint: str | Path | None = None) -> list[str]:
     return sorted(months)
 
 
-def _load_tab2_scored_df(tab2_dir: Path, target_month: int) -> pd.DataFrame:
+def available_tab1_months(root_hint: str | Path | None = None) -> list[str]:
+    try:
+        root = resolve_tab1_artifacts_dir(root_hint=root_hint)
+    except FileNotFoundError:
+        return []
+    months: set[str] = set()
+    for path in root.glob("tab1_snapshot_*.parquet"):
+        month_text = path.stem.rsplit("_", 1)[-1]
+        if month_text.isdigit() and len(month_text) == 6:
+            months.add(yyyymm_to_label(int(month_text)))
+    return sorted(months)
+
+
+def available_tab3_months(root_hint: str | Path | None = None) -> list[str]:
+    months: set[str] = set()
+    try:
+        prescriptive_root = resolve_tab3_artifacts_dir(root_hint=root_hint)
+    except FileNotFoundError:
+        prescriptive_root = None
+    if prescriptive_root is not None:
+        for path in prescriptive_root.glob("tab3_*_201*.parquet"):
+            month_text = path.stem.rsplit("_", 1)[-1]
+            if month_text.isdigit() and len(month_text) == 6:
+                months.add(yyyymm_to_label(int(month_text)))
+        for path in prescriptive_root.glob("tab3_*_201*.json"):
+            month_text = path.stem.rsplit("_", 1)[-1]
+            if month_text.isdigit() and len(month_text) == 6:
+                months.add(yyyymm_to_label(int(month_text)))
+    try:
+        monte_carlo_root = resolve_tab3_monte_carlo_dir(root_hint=root_hint)
+    except FileNotFoundError:
+        monte_carlo_root = None
+    if monte_carlo_root is not None:
+        for path in monte_carlo_root.glob("tab3_*_201*.parquet"):
+            month_text = path.stem.rsplit("_", 1)[-1]
+            if month_text.isdigit() and len(month_text) == 6:
+                months.add(yyyymm_to_label(int(month_text)))
+        for path in monte_carlo_root.glob("tab3_*_201*.json"):
+            month_text = path.stem.rsplit("_", 1)[-1]
+            if month_text.isdigit() and len(month_text) == 6:
+                months.add(yyyymm_to_label(int(month_text)))
+    return sorted(months)
+
+
+def _tab1_dimension_column(dimension: str) -> str:
+    normalized = (dimension or "").strip().lower()
+    return TAB1_DIMENSION_FIELD_MAP.get(normalized, "age_segment")
+
+
+def _load_tab1_snapshot_df(
+    tab1_dir: Path,
+    target_month: int,
+    columns: Iterable[str] | None = None,
+) -> pd.DataFrame:
+    path = tab1_dir / f"tab1_snapshot_{target_month}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab1 snapshot artifact cho thang {target_month} trong {tab1_dir}")
+    return read_parquet_copy(path, columns=columns)
+
+
+def _load_tab1_monthly_kpis(tab1_dir: Path) -> pd.DataFrame:
+    return read_parquet_copy(tab1_dir / "tab1_kpis_monthly.parquet")
+
+
+def _load_tab1_km_curves(tab1_dir: Path) -> pd.DataFrame:
+    return read_parquet_copy(tab1_dir / "tab1_km_curves.parquet")
+
+
+def _coerce_rate_pct(value: Any) -> float:
+    numeric = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+    if pd.isna(numeric):
+        return 0.0
+    numeric = float(numeric)
+    if 0.0 <= numeric <= 1.0:
+        numeric *= 100.0
+    return numeric
+
+
+def _build_tab1_churn_breakdown(total_expiring_users: int, historical_churn_rate: float) -> dict[str, Any]:
+    total_users = max(int(total_expiring_users), 0)
+    churn_rate_pct = float(np.clip(historical_churn_rate, 0.0, 100.0))
+    churned_users = int(round(total_users * churn_rate_pct / 100.0))
+    churned_users = min(max(churned_users, 0), total_users)
+    renewed_users = total_users - churned_users
+    renewed_rate = 100.0 - churn_rate_pct if total_users > 0 else 0.0
+    return {
+        "renewed_users": renewed_users,
+        "churned_users": churned_users,
+        "renewed_rate": renewed_rate,
+        "churned_rate": churn_rate_pct,
+    }
+
+
+def _build_tab1_monthly_trend_from_feature_store(
+    monthly_kpis: pd.DataFrame,
+    *,
+    root_hint: str | Path | None = None,
+    segment_type: Optional[str] = None,
+    segment_value: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    feature_store_dir = resolve_feature_store_dir(root_hint=root_hint, score_month=201704)
+    feature_df = read_parquet_copy(
+        feature_store_dir / "train_features_bi_all.parquet",
+        columns=(
+            "target_month",
+            "msno",
+            "loyalty_segment",
+            "is_churn",
+            "is_auto_renew",
+            "expected_renewal_amount",
+            "price_segment",
+            "active_segment",
+        ),
+    )
+    filtered = _filter_by_segment(feature_df, segment_type, segment_value)
+    if filtered.empty:
+        return []
+
+    monthly_lookup = (
+        monthly_kpis.set_index("target_month")["median_survival_days_proxy"].to_dict()
+        if "median_survival_days_proxy" in monthly_kpis.columns
+        else {}
+    )
+    grouped = (
+        filtered.groupby("target_month", as_index=False)
+        .agg(
+            total_expiring_users=("msno", "nunique"),
+            historical_churn_rate=("is_churn", lambda s: float(pd.to_numeric(s, errors="coerce").fillna(0.0).mean() * 100.0)),
+            auto_renew_rate=("is_auto_renew", lambda s: float(pd.to_numeric(s, errors="coerce").fillna(0.0).mean() * 100.0)),
+            total_expected_renewal_amount=("expected_renewal_amount", lambda s: float(pd.to_numeric(s, errors="coerce").fillna(0.0).clip(lower=0.0).sum())),
+            new_paid_users=("loyalty_segment", lambda s: int(s.fillna("").astype(str).eq("New < 30d").sum())),
+            churned_users=("is_churn", lambda s: int(pd.to_numeric(s, errors="coerce").fillna(0.0).sum())),
+        )
+        .sort_values("target_month")
+        .reset_index(drop=True)
+    )
+
+    rows: list[dict[str, Any]] = []
+    for row in grouped.itertuples(index=False):
+        target_month = int(getattr(row, "target_month"))
+        if target_month in TAB1_EXCLUDED_TREND_MONTHS:
+            continue
+        total_users = int(getattr(row, "total_expiring_users", 0) or 0)
+        total_expected_renewal_amount = float(getattr(row, "total_expected_renewal_amount", 0.0) or 0.0)
+        new_paid_users = int(getattr(row, "new_paid_users", 0) or 0)
+        churned_users = int(getattr(row, "churned_users", 0) or 0)
+        rows.append(
+            {
+                "target_month": target_month,
+                "month_label": yyyymm_to_label(target_month),
+                "total_expiring_users": total_users,
+                "historical_churn_rate": float(getattr(row, "historical_churn_rate", 0.0) or 0.0),
+                "overall_median_survival": float(monthly_lookup.get(target_month, 0.0) or 0.0),
+                "auto_renew_rate": float(getattr(row, "auto_renew_rate", 0.0) or 0.0),
+                "total_expected_renewal_amount": total_expected_renewal_amount,
+                "apru": float(total_expected_renewal_amount / total_users) if total_users > 0 else None,
+                "new_paid_users": new_paid_users,
+                "churned_users": churned_users,
+                "net_movement": int(new_paid_users - churned_users),
+            }
+        )
+    return rows
+
+
+def _build_tab1_monthly_trend_from_kpis(
+    tab1_dir: Path,
+    monthly_kpis: pd.DataFrame,
+    *,
+    root_hint: str | Path | None = None,
+    segment_type: Optional[str] = None,
+    segment_value: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    try:
+        feature_rows = _build_tab1_monthly_trend_from_feature_store(
+            monthly_kpis,
+            root_hint=root_hint,
+            segment_type=segment_type,
+            segment_value=segment_value,
+        )
+    except (FileNotFoundError, ValueError):
+        feature_rows = []
+
+    if feature_rows:
+        return feature_rows
+
+    if monthly_kpis.empty:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    ordered = monthly_kpis.sort_values("target_month").reset_index(drop=True)
+    for row in ordered.itertuples(index=False):
+        target_month = int(getattr(row, "target_month"))
+        if target_month in TAB1_EXCLUDED_TREND_MONTHS:
+            continue
+        churn_rate_pct = _coerce_rate_pct(getattr(row, "historical_churn_rate", 0.0))
+        if churn_rate_pct >= 99.0:
+            try:
+                snapshot_df = _load_tab1_snapshot_df(tab1_dir, target_month, columns=("churn_rate",))
+                churn_rate_clean = pd.to_numeric(snapshot_df["churn_rate"], errors="coerce")
+                churn_rate_clean = churn_rate_clean[churn_rate_clean >= 0]
+                if not churn_rate_clean.empty:
+                    churn_rate_pct = float(churn_rate_clean.mean() * 100.0)
+            except FileNotFoundError:
+                pass
+
+        auto_renew_rate = _coerce_rate_pct(getattr(row, "auto_renew_rate", 0.0))
+        total_users = int(getattr(row, "total_expiring_users", 0) or 0)
+        revenue_value = pd.to_numeric(pd.Series([getattr(row, "total_expected_renewal_amount", np.nan)]), errors="coerce").iloc[0]
+        total_expected_renewal_amount = None if pd.isna(revenue_value) else float(revenue_value)
+        apru = (
+            float(total_expected_renewal_amount / total_users)
+            if total_expected_renewal_amount is not None and total_users > 0
+            else None
+        )
+        rows.append(
+            {
+                "target_month": target_month,
+                "month_label": yyyymm_to_label(target_month),
+                "total_expiring_users": total_users,
+                "historical_churn_rate": churn_rate_pct,
+                "overall_median_survival": float(getattr(row, "median_survival_days_proxy", 0.0) or 0.0),
+                "auto_renew_rate": auto_renew_rate,
+                "total_expected_renewal_amount": total_expected_renewal_amount,
+                "apru": apru,
+                "new_paid_users": None,
+                "churned_users": int(round(total_users * churn_rate_pct / 100.0)),
+                "net_movement": None,
+            }
+        )
+    return rows
+
+
+def _build_tab1_risk_heatmap(snapshot_df: pd.DataFrame) -> list[dict[str, Any]]:
+    if snapshot_df.empty or "msno" not in snapshot_df.columns:
+        return []
+
+    price_segment = snapshot_df["price_segment"].fillna("").astype(str) if "price_segment" in snapshot_df.columns else pd.Series("", index=snapshot_df.index)
+    free_trial_flag = (
+        pd.to_numeric(snapshot_df["free_trial_flag"], errors="coerce").fillna(0.0)
+        if "free_trial_flag" in snapshot_df.columns
+        else pd.Series(0.0, index=snapshot_df.index)
+    )
+    deal_hunter_flag = (
+        pd.to_numeric(snapshot_df["deal_hunter_flag"], errors="coerce").fillna(0.0)
+        if "deal_hunter_flag" in snapshot_df.columns
+        else pd.Series(0.0, index=snapshot_df.index)
+    )
+    churn_rate = (
+        pd.to_numeric(snapshot_df["churn_rate"], errors="coerce").fillna(-1.0)
+        if "churn_rate" in snapshot_df.columns
+        else pd.Series(-1.0, index=snapshot_df.index)
+    )
+
+    value_tier = pd.Series(
+        np.select(
+            [
+                (free_trial_flag >= 0.5) | price_segment.str.contains("Free Trial", case=False, regex=False),
+                (deal_hunter_flag >= 0.5) | price_segment.str.contains("Deal Hunter", case=False, regex=False),
+            ],
+            ["Free Trial", "Deal Hunter"],
+            default="Standard",
+        ),
+        index=snapshot_df.index,
+    )
+    risk_segment = pd.Series(
+        np.select(
+            [churn_rate >= 0.25, churn_rate > 0.0],
+            ["At Risk", "Watchlist"],
+            default="Stable",
+        ),
+        index=snapshot_df.index,
+    )
+
+    grouped = (
+        pd.DataFrame(
+            {
+                "msno": snapshot_df["msno"].fillna("").astype(str),
+                "value_tier": value_tier,
+                "risk_segment": risk_segment,
+            }
+        )
+        .groupby(["value_tier", "risk_segment"], as_index=False)
+        .agg(users=("msno", "nunique"))
+    )
+
+    heatmap_index = pd.MultiIndex.from_product(
+        [TAB1_VISIBLE_VALUE_TIERS, TAB1_RISK_SEGMENT_ORDER],
+        names=["value_tier", "risk_segment"],
+    )
+    grouped = grouped.set_index(["value_tier", "risk_segment"]).reindex(heatmap_index, fill_value=0).reset_index()
+    grouped["users"] = grouped["users"].astype(int)
+    return grouped.to_dict(orient="records")
+
+
+def _build_tab1_daily_snapshot_series(
+    snapshot_df: pd.DataFrame,
+    month_start: date,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    if snapshot_df.empty or "expire_day" not in snapshot_df.columns:
+        return [], [], []
+
+    days_in_month = monthrange(month_start.year, month_start.month)[1]
+    work = snapshot_df.copy()
+
+    def numeric_series(column: str, *, fill_value: float = 0.0) -> pd.Series:
+        if column not in work.columns:
+            return pd.Series(fill_value, index=work.index, dtype="float64")
+        return pd.to_numeric(work[column], errors="coerce").fillna(fill_value)
+
+    expire_day = numeric_series("expire_day")
+    work = work.loc[expire_day.between(1, days_in_month)].copy()
+    if work.empty:
+        return [], [], []
+
+    expire_day = pd.to_numeric(work["expire_day"], errors="coerce").fillna(0).astype(int)
+    expected_renewal_amount = numeric_series("expected_renewal_amount").clip(lower=0.0)
+    actual_amount_paid = numeric_series("actual_amount_paid").clip(lower=0.0)
+    activity_secs = numeric_series("total_secs_sum").clip(lower=0.0)
+    skip_ratio = numeric_series("skip_ratio").clip(lower=0.0, upper=1.0)
+    discovery_ratio = numeric_series("discovery_ratio").clip(lower=0.0, upper=1.0)
+    high_skip_flag = numeric_series("high_skip_flag").clip(lower=0.0, upper=1.0)
+    low_discovery_flag = numeric_series("low_discovery_flag").clip(lower=0.0, upper=1.0)
+    content_fatigue_flag = numeric_series("content_fatigue_flag").clip(lower=0.0, upper=1.0)
+
+    if "is_manual_renew" in work.columns:
+        manual_renew_signal = numeric_series("is_manual_renew").clip(lower=0.0, upper=1.0)
+    else:
+        manual_renew_signal = 1.0 - numeric_series("is_auto_renew").clip(lower=0.0, upper=1.0)
+
+    revenue_proxy = expected_renewal_amount.where(expected_renewal_amount > 0.0, actual_amount_paid)
+    risk_score = (
+        0.45 * skip_ratio
+        + 0.25 * (1.0 - discovery_ratio)
+        + 0.15 * manual_renew_signal
+        + 0.10 * high_skip_flag
+        + 0.03 * low_discovery_flag
+        + 0.02 * content_fatigue_flag
+    ).clip(lower=0.0, upper=1.0)
+    risk_threshold = float(np.clip(risk_score.quantile(0.75), 0.40, 0.70)) if not risk_score.empty else 0.55
+
+    if "active_segment" in work.columns:
+        active_segment = work["active_segment"].fillna("").astype(str)
+        is_active_user = (activity_secs > 0.0) | active_segment.isin(("Light 1-5 logs", "Active 6-15 logs", "Heavy > 15 logs"))
+    else:
+        is_active_user = activity_secs > 0.0
+
+    work = work.assign(
+        expire_day=expire_day,
+        revenue_proxy=revenue_proxy,
+        activity_secs=activity_secs,
+        risk_score=risk_score,
+        high_risk_user=(risk_score >= risk_threshold).astype("int8"),
+        active_user=is_active_user.astype("int8"),
+        cohort_user=1,
+    )
+
+    grouped = (
+        work.groupby("expire_day", as_index=False)
+        .agg(
+            total_revenue=("revenue_proxy", "sum"),
+            total_transactions=("cohort_user", "sum"),
+            high_risk_users=("high_risk_user", "sum"),
+            avg_risk_score=("risk_score", "mean"),
+            active_users=("active_user", "sum"),
+            total_listening_secs=("activity_secs", "sum"),
+        )
+        .sort_values("expire_day")
+    )
+
+    grouped = (
+        pd.DataFrame({"expire_day": np.arange(1, days_in_month + 1, dtype=int)})
+        .merge(grouped, on="expire_day", how="left")
+        .fillna(0.0)
+    )
+    grouped["event_date"] = [
+        date(month_start.year, month_start.month, int(day)).isoformat()
+        for day in grouped["expire_day"].tolist()
+    ]
+    grouped["avg_risk_score"] = grouped["avg_risk_score"] * 100.0
+
+    for column in ("total_transactions", "high_risk_users", "active_users"):
+        grouped[column] = grouped[column].round().astype(int)
+
+    revenue_series = grouped.loc[:, ["event_date", "total_revenue", "total_transactions"]].to_dict(orient="records")
+    risk_series = grouped.loc[:, ["event_date", "high_risk_users", "avg_risk_score"]].to_dict(orient="records")
+    activity_series = grouped.loc[:, ["event_date", "active_users", "total_listening_secs"]].to_dict(orient="records")
+    return revenue_series, risk_series, activity_series
+
+
+def _empty_tab1_payload(
+    *,
+    target_month: int,
+    dimension: str,
+    segment_type: Optional[str],
+    segment_value: Optional[str],
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    return {
+        "meta": {
+            "month": yyyymm_to_label(target_month),
+            "dimension": _tab1_dimension_column(dimension),
+            "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
+            "trend_scope": "filtered" if segment_type and segment_value else "overall",
+            "artifact_mode": "artifact_backed",
+            "artifact_dir": str(artifact_dir),
+        },
+        "kpis": {
+            "total_expiring_users": 0,
+            "historical_churn_rate": 0.0,
+            "overall_median_survival": 0.0,
+            "auto_renew_rate": 0.0,
+        },
+        "monthly_trend": [],
+        "churn_breakdown": {
+            "renewed_users": 0,
+            "churned_users": 0,
+            "renewed_rate": 0.0,
+            "churned_rate": 0.0,
+        },
+        "risk_heatmap": [],
+        "km_curve": [],
+        "segment_mix": [],
+        "boredom_scatter": [],
+    }
+
+
+def build_tab1_descriptive_payload(
+    month_start: date,
+    *,
+    dimension: str = "age",
+    segment_type: Optional[str] = None,
+    segment_value: Optional[str] = None,
+    root_hint: str | Path | None = None,
+    prefer_cache: bool = True,
+) -> dict[str, Any]:
+    target_month = month_start_to_yyyymm(month_start)
+    tab1_dir = resolve_tab1_artifacts_dir(root_hint=root_hint, score_month=target_month)
+    if prefer_cache:
+        cache_path = _tab1_payload_cache_path(
+            tab1_dir,
+            target_month=target_month,
+            dimension=dimension,
+            segment_type=segment_type,
+            segment_value=segment_value,
+        )
+        if cache_path.exists():
+            return read_json_copy(cache_path)
+    snapshot_df = _load_tab1_snapshot_df(tab1_dir, target_month)
+    filtered = _filter_by_segment(snapshot_df, segment_type, segment_value)
+    dimension_col = _tab1_dimension_column(dimension)
+    monthly_kpis = _load_tab1_monthly_kpis(tab1_dir)
+    monthly_row = monthly_kpis[monthly_kpis["target_month"] == target_month]
+    monthly_trend = _build_tab1_monthly_trend_from_kpis(
+        tab1_dir,
+        monthly_kpis,
+        root_hint=root_hint,
+        segment_type=segment_type,
+        segment_value=segment_value,
+    )
+    trend_scope = "filtered" if segment_type and segment_value and monthly_trend else "overall"
+
+    if filtered.empty:
+        return _empty_tab1_payload(
+            target_month=target_month,
+            dimension=dimension,
+            segment_type=segment_type,
+            segment_value=segment_value,
+            artifact_dir=tab1_dir,
+        )
+
+    if dimension_col not in filtered.columns:
+        raise ValueError(f"Khong tim thay cot dimension trong artifact Tab 1: {dimension_col}")
+
+    work = filtered.copy()
+    churn_rate_clean = work["churn_rate"].where(work["churn_rate"] >= 0) if "churn_rate" in work.columns else pd.Series(dtype="float64")
+
+    segment_frames: list[pd.DataFrame] = []
+    for current_segment in sorted(ALLOWED_SEGMENT_TYPES):
+        if current_segment not in work.columns:
+            continue
+        grouped = (
+            work.assign(segment_value=work[current_segment].fillna("Unknown").astype(str))
+            .groupby("segment_value", as_index=False)
+            .agg(
+                users=("msno", "nunique"),
+                churn_rate_pct=("churn_rate", lambda s: float(s[s >= 0].mean() * 100.0) if (s >= 0).any() else 0.0),
+            )
+        )
+        grouped["retain_rate_pct"] = 100.0 - grouped["churn_rate_pct"]
+        grouped["segment_type"] = current_segment
+        segment_frames.append(grouped[["segment_type", "segment_value", "users", "churn_rate_pct", "retain_rate_pct"]])
+
+    segment_mix = (
+        pd.concat(segment_frames, ignore_index=True)
+        .sort_values(["segment_type", "segment_value"])
+        .reset_index(drop=True)
+        .to_dict(orient="records")
+        if segment_frames
+        else []
+    )
+
+    boredom_df = (
+        work.assign(
+            discovery_ratio=work["discovery_ratio"].fillna(0.0).round(2),
+            skip_ratio=work["skip_ratio"].fillna(0.0).round(2),
+        )
+        .groupby(["discovery_ratio", "skip_ratio"], as_index=False)
+        .agg(
+            users=("msno", "nunique"),
+            churn_rate_pct=("churn_rate", lambda s: float(s[s >= 0].mean() * 100.0) if (s >= 0).any() else 0.0),
+        )
+        .sort_values("users", ascending=False)
+        .head(800)
+    )
+
+    if segment_type or segment_value:
+        km_curve: list[dict[str, Any]] = []
+    else:
+        km_df = _load_tab1_km_curves(tab1_dir)
+        scoped_km = (
+            km_df[(km_df["target_month"] == target_month) & (km_df["dimension"] == dimension_col)]
+            .sort_values(["dimension_value", "day"])
+            .reset_index(drop=True)
+        )
+        km_curve = []
+        for dimension_value, group in scoped_km.groupby("dimension_value", sort=True):
+            points = []
+            for _, row in group.iterrows():
+                points.append(
+                    {
+                        "day": int(row["day"]),
+                        "survival_prob": float(row["survival_prob"]),
+                        "at_risk": int(row["at_risk"]),
+                        "events": int(row["events"]),
+                    }
+                )
+            km_curve.append({"dimension_value": str(dimension_value), "points": points})
+
+    if not monthly_row.empty and not segment_type and not segment_value:
+        kpi_row = monthly_row.iloc[0]
+        total_expiring_users = int(kpi_row.get("total_expiring_users", 0))
+        historical_churn_rate = float(kpi_row.get("historical_churn_rate", 0.0))
+        auto_renew_rate = float(kpi_row.get("auto_renew_rate", 0.0))
+        overall_median_survival = float(kpi_row.get("median_survival_days_proxy", 0.0))
+        if historical_churn_rate <= 1.0:
+            historical_churn_rate *= 100.0
+        if auto_renew_rate <= 1.0:
+            auto_renew_rate *= 100.0
+        if historical_churn_rate >= 99.0 and churn_rate_clean.notna().any():
+            historical_churn_rate = float(churn_rate_clean.mean() * 100.0)
+    else:
+        total_expiring_users = int(work["msno"].nunique())
+        historical_churn_rate = float(churn_rate_clean.mean() * 100.0) if not churn_rate_clean.empty and churn_rate_clean.notna().any() else 0.0
+        overall_median_survival = float(work["survival_days_proxy"].dropna().median()) if work["survival_days_proxy"].notna().any() else 0.0
+        auto_renew_rate = float(work["is_auto_renew"].mean() * 100.0)
+
+    churn_breakdown = _build_tab1_churn_breakdown(total_expiring_users, historical_churn_rate)
+    risk_heatmap = _build_tab1_risk_heatmap(work)
+
+    return {
+        "meta": {
+            "month": yyyymm_to_label(target_month),
+            "dimension": dimension_col,
+            "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
+            "trend_scope": trend_scope,
+            "artifact_mode": "artifact_backed",
+            "artifact_dir": str(tab1_dir),
+        },
+        "kpis": {
+            "total_expiring_users": total_expiring_users,
+            "historical_churn_rate": historical_churn_rate,
+            "overall_median_survival": overall_median_survival,
+            "auto_renew_rate": auto_renew_rate,
+        },
+        "monthly_trend": monthly_trend,
+        "churn_breakdown": churn_breakdown,
+        "risk_heatmap": risk_heatmap,
+        "km_curve": km_curve,
+        "segment_mix": segment_mix,
+        "boredom_scatter": boredom_df.to_dict(orient="records"),
+    }
+
+
+def build_dashboard_snapshot_payload(
+    month_start: date,
+    *,
+    root_hint: str | Path | None = None,
+    prefer_cache: bool = True,
+) -> dict[str, Any]:
+    target_month = month_start_to_yyyymm(month_start)
+    tab1_dir = resolve_tab1_artifacts_dir(root_hint=root_hint, score_month=target_month)
+    if prefer_cache:
+        cache_path = _snapshot_payload_cache_path(tab1_dir, target_month=target_month)
+        if cache_path.exists():
+            return read_json_copy(cache_path)
+    snapshot_df = _load_tab1_snapshot_df(tab1_dir, target_month, columns=TAB1_SNAPSHOT_DAILY_COLUMNS)
+    monthly = _load_tab1_monthly_kpis(tab1_dir)
+    monthly = monthly[monthly["target_month"] == target_month]
+    churn_rate_clean = snapshot_df["churn_rate"].where(snapshot_df["churn_rate"] >= 0) if "churn_rate" in snapshot_df.columns else pd.Series(dtype="float64")
+    revenue_series, risk_series, activity_series = _build_tab1_daily_snapshot_series(snapshot_df, month_start)
+
+    if not monthly.empty:
+        row = monthly.iloc[0]
+        historical_churn_rate = float(row.get("historical_churn_rate", 0.0))
+        auto_renew_rate = float(row.get("auto_renew_rate", 0.0))
+        if historical_churn_rate <= 1.0:
+            historical_churn_rate *= 100.0
+        if auto_renew_rate <= 1.0:
+            auto_renew_rate *= 100.0
+        if historical_churn_rate >= 99.0 and not churn_rate_clean.empty and churn_rate_clean.notna().any():
+            historical_churn_rate = float(churn_rate_clean.mean() * 100.0)
+        metrics = {
+            "total_expiring_users": int(row.get("total_expiring_users", 0)),
+            "historical_churn_rate": historical_churn_rate,
+            "median_survival_days": float(row.get("median_survival_days_proxy", 0.0)),
+            "auto_renew_rate": auto_renew_rate,
+        }
+    else:
+        metrics = {
+            "total_expiring_users": int(snapshot_df["msno"].nunique()),
+            "historical_churn_rate": float(churn_rate_clean.mean() * 100.0) if not churn_rate_clean.empty and churn_rate_clean.notna().any() else 0.0,
+            "median_survival_days": float(snapshot_df["survival_days_proxy"].dropna().median()) if snapshot_df["survival_days_proxy"].notna().any() else 0.0,
+            "auto_renew_rate": float(snapshot_df["is_auto_renew"].mean() * 100.0),
+        }
+
+    manifest_path = tab1_dir / "manifest.json"
+    file_times = [path.stat().st_mtime for path in [tab1_dir / "tab1_kpis_monthly.parquet", tab1_dir / f"tab1_snapshot_{target_month}.parquet"] if path.exists()]
+    if manifest_path.exists():
+        file_times.append(manifest_path.stat().st_mtime)
+    as_of = datetime.fromtimestamp(max(file_times), tz=timezone.utc).isoformat() if file_times else datetime.now(timezone.utc).isoformat()
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1)
+
+    return {
+        "meta": {
+            "month": yyyymm_to_label(target_month),
+            "month_start": month_start.isoformat(),
+            "month_end_exclusive": next_month.isoformat(),
+            "as_of": as_of,
+            "artifact_mode": "artifact_backed",
+            "series_mode": "expire_day_proxy",
+            "artifact_dir": str(tab1_dir),
+        },
+        "metrics": metrics,
+        "revenue_series": revenue_series,
+        "risk_series": risk_series,
+        "activity_series": activity_series,
+    }
+
+
+def _load_tab2_scored_df(
+    tab2_dir: Path,
+    target_month: int,
+    columns: Iterable[str] | None = None,
+) -> pd.DataFrame:
     candidates = [
         tab2_dir / f"tab2_test_scored_{target_month}.parquet",
         tab2_dir / f"tab2_valid_scored_{target_month}.parquet",
     ]
     for path in candidates:
         if path.exists():
-            return read_parquet_copy(path)
+            return read_parquet_copy(path, columns=columns)
     raise FileNotFoundError(f"Khong tim thay scored artifact cho thang {target_month} trong {tab2_dir}")
+
+
+def _load_tab2_segment_summary_df(tab2_dir: Path, target_month: int) -> pd.DataFrame:
+    path = tab2_dir / f"tab2_segment_risk_summary_{target_month}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab2 segment summary cho thang {target_month} trong {tab2_dir}")
+    return read_parquet_copy(path)
+
+
+def _load_tab3_segment_impact_df(tab3_dir: Path, target_month: int) -> pd.DataFrame:
+    path = tab3_dir / f"tab3_segment_impact_{target_month}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab3 segment impact cho thang {target_month} trong {tab3_dir}")
+    return read_parquet_copy(path)
+
+
+def _load_tab3_population_risk_shift_df(tab3_dir: Path, target_month: int) -> pd.DataFrame:
+    path = tab3_dir / f"tab3_population_risk_shift_{target_month}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab3 population risk shift cho thang {target_month} trong {tab3_dir}")
+    return read_parquet_copy(path)
+
+
+def _load_tab3_sensitivity_df(tab3_dir: Path, target_month: int) -> pd.DataFrame:
+    path = tab3_dir / f"tab3_sensitivity_{target_month}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab3 sensitivity cho thang {target_month} trong {tab3_dir}")
+    return read_parquet_copy(path)
+
+
+def _load_tab3_scenario_summary(tab3_dir: Path, target_month: int) -> dict[str, Any]:
+    path = tab3_dir / f"tab3_scenario_summary_{target_month}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab3 scenario summary cho thang {target_month} trong {tab3_dir}")
+    return read_json_copy(path)
 
 
 def _validate_segment_filter(segment_type: Optional[str], segment_value: Optional[str]) -> None:
@@ -232,6 +1340,56 @@ def _filter_by_segment(df: pd.DataFrame, segment_type: Optional[str], segment_va
     return df[df[segment_type].fillna("Unknown").astype(str) == segment_value].reset_index(drop=True)
 
 
+def _apply_sample_limit(df: pd.DataFrame, sample_limit: Optional[int]) -> pd.DataFrame:
+    if sample_limit is None or sample_limit <= 0 or len(df) <= sample_limit:
+        return df.reset_index(drop=True)
+    if "msno" not in df.columns:
+        return df.head(sample_limit).reset_index(drop=True)
+    hashed = pd.util.hash_pandas_object(df["msno"].fillna("").astype(str), index=False)
+    sampled_index = hashed.sort_values(kind="stable").index[:sample_limit]
+    return df.loc[sampled_index].reset_index(drop=True)
+
+
+def _artifact_segment_parts(segment_name: str) -> dict[str, str]:
+    parts = [part.strip() for part in str(segment_name).split("|")]
+    fields = {
+        "loyalty_segment": "Unknown",
+        "renewal_segment": "Unknown",
+        "price_segment": "Unknown",
+        "discovery_segment": "Unknown",
+    }
+    for key, value in zip(fields.keys(), parts):
+        fields[key] = value or "Unknown"
+    return fields
+
+
+def _with_artifact_segment_columns(df: pd.DataFrame, source_col: str) -> pd.DataFrame:
+    if df.empty:
+        enriched = df.copy()
+        for key in ("loyalty_segment", "renewal_segment", "price_segment", "discovery_segment"):
+            enriched[key] = pd.Series(dtype="object")
+        return enriched
+
+    parts_df = pd.DataFrame([_artifact_segment_parts(value) for value in df[source_col].fillna("Unknown").astype(str)])
+    return pd.concat([df.reset_index(drop=True), parts_df], axis=1)
+
+
+def _filter_artifact_segment_summary(
+    df: pd.DataFrame,
+    source_col: str,
+    segment_type: Optional[str],
+    segment_value: Optional[str],
+) -> pd.DataFrame:
+    _validate_segment_filter(segment_type, segment_value)
+    if not segment_type or not segment_value:
+        return _with_artifact_segment_columns(df, source_col).reset_index(drop=True)
+
+    enriched = _with_artifact_segment_columns(df, source_col)
+    if segment_type not in enriched.columns:
+        return enriched.iloc[0:0].copy()
+    return enriched[enriched[segment_type].fillna("Unknown").astype(str) == segment_value].reset_index(drop=True)
+
+
 def _safe_probability(series: pd.Series) -> pd.Series:
     return series.fillna(0).astype("float32").clip(lower=1e-4, upper=1 - 1e-4)
 
@@ -240,11 +1398,29 @@ def _safe_amount(series: pd.Series) -> pd.Series:
     return series.fillna(0).astype("float32").clip(lower=0.0)
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _mean_or_default(series: pd.Series, default: float) -> float:
     valid = series.dropna()
     if valid.empty:
         return float(default)
     return float(valid.mean())
+
+
+def _weighted_mean(values: Iterable[float], weights: Iterable[float], default: float = 0.0) -> float:
+    values_arr = np.asarray(list(values), dtype="float64")
+    weights_arr = np.asarray(list(weights), dtype="float64")
+    total_weight = float(weights_arr.sum())
+    if values_arr.size == 0 or total_weight <= 0:
+        return float(default)
+    return float(np.average(values_arr, weights=weights_arr))
 
 
 def _first_non_empty_median(frames: list[pd.Series], default: float = 0.0) -> float:
@@ -357,6 +1533,407 @@ def _build_revenue_leakage(df: pd.DataFrame) -> list[dict[str, Any]]:
     return grouped.to_dict(orient="records")
 
 
+def _primary_risk_driver_from_segment_fields(row: pd.Series) -> str:
+    renewal = str(row.get("renewal_segment") or "Unknown")
+    discovery = str(row.get("discovery_segment") or "Unknown")
+    price = str(row.get("price_segment") or "Unknown")
+    loyalty = str(row.get("loyalty_segment") or "Unknown")
+
+    if renewal == "Pay_Manual":
+        return "Manual Renewal"
+    if discovery == "Habit < 20%":
+        return "Low Discovery"
+    if price in {"Deal Hunter < 4.5", "Free Trial / Zero Pay"}:
+        return "Price Sensitivity"
+    if loyalty in {"New < 30d", "Growing 30-179d"}:
+        return "Early Lifecycle"
+    return "Mixed Behavioral Risk"
+
+
+def _build_predictive_matrix_from_segment_summary(summary_df: pd.DataFrame) -> list[dict[str, Any]]:
+    if summary_df.empty:
+        return []
+
+    work = summary_df.copy()
+    work["strategic_segment"] = work["bi_segment_name"].fillna("Unknown").astype(str)
+    work["user_count"] = work["users"].fillna(0).astype(int)
+    work["avg_churn_prob"] = work["avg_churn_probability"].fillna(0.0).astype("float64")
+    work["avg_churn_prob_pct"] = work["avg_churn_prob"] * 100.0
+    work["total_future_cltv"] = work["total_expected_retained_revenue_30d"].fillna(0.0).astype("float64")
+    work["revenue_at_risk"] = work["total_expected_revenue_at_risk_30d"].fillna(0.0).astype("float64")
+    work["avg_future_cltv"] = work["total_future_cltv"] / work["user_count"].clip(lower=1)
+    work["primary_risk_driver"] = work.apply(_primary_risk_driver_from_segment_fields, axis=1)
+
+    cltv_mid = float(work["avg_future_cltv"].median()) if not work.empty else 0.0
+    risk_mid = float(work["avg_churn_prob_pct"].median()) if not work.empty else 0.0
+    work["quadrant"] = np.select(
+        [
+            (work["avg_future_cltv"] >= cltv_mid) & (work["avg_churn_prob_pct"] >= risk_mid),
+            (work["avg_future_cltv"] < cltv_mid) & (work["avg_churn_prob_pct"] >= risk_mid),
+            (work["avg_future_cltv"] >= cltv_mid) & (work["avg_churn_prob_pct"] < risk_mid),
+        ],
+        ["Must Save", "At Risk", "Core Value"],
+        default="Monitor",
+    )
+
+    ordered = work.sort_values(["revenue_at_risk", "avg_churn_prob"], ascending=[False, False]).reset_index(drop=True)
+    columns = [
+        "strategic_segment",
+        "user_count",
+        "avg_churn_prob",
+        "avg_churn_prob_pct",
+        "avg_future_cltv",
+        "total_future_cltv",
+        "revenue_at_risk",
+        "primary_risk_driver",
+        "quadrant",
+    ]
+    return ordered[columns].to_dict(orient="records")
+
+
+def _build_predictive_kpis_from_summary_rows(matrix_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not matrix_rows:
+        return _zero_predictive_kpis()
+
+    total_users = sum(max(int(row.get("user_count", 0)), 0) for row in matrix_rows)
+    weighted_prob = _weighted_mean(
+        [float(row.get("avg_churn_prob", 0.0)) for row in matrix_rows],
+        [max(float(row.get("user_count", 0)), 0.0) for row in matrix_rows],
+        default=0.0,
+    )
+    top = matrix_rows[0]
+    return {
+        "forecasted_churn_rate": float(weighted_prob * 100.0),
+        "predicted_revenue_at_risk": float(sum(float(row.get("revenue_at_risk", 0.0)) for row in matrix_rows)),
+        "predicted_total_future_cltv": float(sum(float(row.get("total_future_cltv", 0.0)) for row in matrix_rows)),
+        "top_segment": str(top.get("strategic_segment") or "N/A"),
+        "top_segment_risk": float(top.get("revenue_at_risk", 0.0)),
+        "top_segment_user_count": max(int(top.get("user_count", 0)), 0),
+        "forecasted_churn_delta_pp_vs_prev_month": 0.0,
+    }
+
+
+def _build_previous_predictive_kpis_from_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    selected_metrics = metrics.get("selected_metrics", {})
+    prev_rate = float(selected_metrics.get("prediction_mean", 0.0) or 0.0)
+    if prev_rate <= 1.0:
+        prev_rate *= 100.0
+    previous = _zero_predictive_kpis()
+    previous["forecasted_churn_rate"] = prev_rate
+    return previous
+
+
+def _build_forecast_decay_from_summary_rows(matrix_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    focus_rows = matrix_rows[:4]
+    rows: list[dict[str, Any]] = []
+    for row in focus_rows:
+        segment = str(row.get("strategic_segment") or "Unknown")
+        avg_prob = float(row.get("avg_churn_prob", 0.0))
+        monthly_retention = float(np.clip(1.0 - avg_prob, 0.05, 0.99))
+        for month_num in range(1, 13):
+            rows.append(
+                {
+                    "month_num": month_num,
+                    "timeline": f"T+{month_num}",
+                    "segment": segment,
+                    "retention_pct": (monthly_retention**month_num) * 100.0,
+                }
+            )
+    return rows
+
+
+def _build_revenue_leakage_from_summary_rows(matrix_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not matrix_rows:
+        return []
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in matrix_rows:
+        driver = str(row.get("primary_risk_driver") or "Unknown")
+        current = grouped.setdefault(driver, {"risk_driver": driver, "user_count": 0, "revenue_at_risk": 0.0})
+        current["user_count"] += max(int(row.get("user_count", 0)), 0)
+        current["revenue_at_risk"] += float(row.get("revenue_at_risk", 0.0))
+    return sorted(grouped.values(), key=lambda item: float(item["revenue_at_risk"]), reverse=True)
+
+
+def _to_executive_risk_band(series: pd.Series) -> pd.Series:
+    bands = series.fillna("Unknown").astype(str)
+    normalized = np.select(
+        [
+            bands.isin(["Very High", "High"]),
+            bands.isin(["Medium", "Low"]),
+            bands.eq("Very Low"),
+        ],
+        ["High", "Medium", "Low"],
+        default="Unknown",
+    )
+    return pd.Series(normalized, index=series.index, dtype="object")
+
+
+def _to_executive_risk_long_label(series: pd.Series) -> pd.Series:
+    return _to_executive_risk_band(series).map(TAB2_EXECUTIVE_RISK_LONG_LABELS).fillna(TAB2_EXECUTIVE_RISK_LONG_LABELS["Unknown"])
+
+
+def _build_risk_band_mix(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty or "risk_band" not in df.columns:
+        return []
+
+    work = df.copy()
+    work["executive_risk_band"] = _to_executive_risk_band(work["risk_band"])
+    grouped = (
+        work.groupby("executive_risk_band", as_index=False)
+        .agg(
+            user_count=("msno", "nunique"),
+            revenue_at_risk=("expected_revenue_at_risk_30d", "sum"),
+        )
+        .rename(columns={"executive_risk_band": "band"})
+    )
+
+    total_risk = float(grouped["revenue_at_risk"].sum()) if not grouped.empty else 0.0
+    grouped["revenue_share_pct"] = (
+        grouped["revenue_at_risk"] / total_risk * 100.0 if total_risk > 0 else 0.0
+    )
+
+    order = {band: idx for idx, band in enumerate(TAB2_EXECUTIVE_RISK_ORDER)}
+    grouped["sort_key"] = grouped["band"].map(order).fillna(99)
+    grouped = grouped.sort_values("sort_key").drop(columns=["sort_key"]).reset_index(drop=True)
+    return grouped.to_dict(orient="records")
+
+
+def _load_tab2_feature_importance_df(tab2_dir: Path) -> pd.DataFrame:
+    for file_name in ("tab2_feature_importance_lightgbm.csv", "tab2_feature_importance_xgboost.csv"):
+        path = tab2_dir / file_name
+        if path.exists():
+            return read_csv_copy(path)
+    raise FileNotFoundError(f"Khong tim thay feature importance CSV trong {tab2_dir}")
+
+
+def _build_feature_group_waterfall(feature_importance_df: pd.DataFrame, total_risk: float) -> list[dict[str, Any]]:
+    if feature_importance_df.empty or total_risk <= 0:
+        return []
+
+    grouped = (
+        feature_importance_df.groupby("feature_group", as_index=False)
+        .agg(
+            importance_gain=("importance_gain", "sum"),
+            importance_split=("importance_split", "sum"),
+            feature_count=("feature", "nunique"),
+        )
+        .sort_values("importance_gain", ascending=False)
+        .reset_index(drop=True)
+    )
+    grouped = grouped[grouped["importance_gain"] > 0].reset_index(drop=True)
+    total_gain = float(grouped["importance_gain"].sum()) if not grouped.empty else 0.0
+    if total_gain <= 0:
+        return []
+
+    base_risk_ratio = 0.30
+    base_risk_val = float(total_risk * base_risk_ratio)
+    explained_risk_val = float(total_risk - base_risk_val)
+    rows: list[dict[str, Any]] = []
+    rows.append(
+        {
+            "feature_group": "base_risk",
+            "display_name": TAB2_FEATURE_GROUP_LABELS["base_risk"],
+            "contribution": base_risk_val,
+            "contribution_pct": float(base_risk_ratio * 100.0),
+            "importance_gain": 0.0,
+            "importance_split": 0,
+            "feature_count": 0,
+        }
+    )
+    for row in grouped.itertuples(index=False):
+        feature_group = str(getattr(row, "feature_group") or "other")
+        contribution = float(explained_risk_val * float(getattr(row, "importance_gain")) / total_gain)
+        rows.append(
+            {
+                "feature_group": feature_group,
+                "display_name": TAB2_FEATURE_GROUP_LABELS.get(feature_group, feature_group.replace("_", " ").title()),
+                "contribution": contribution,
+                "contribution_pct": float(contribution / total_risk * 100.0) if total_risk > 0 else 0.0,
+                "importance_gain": float(getattr(row, "importance_gain", 0.0) or 0.0),
+                "importance_split": int(getattr(row, "importance_split", 0) or 0),
+                "feature_count": int(getattr(row, "feature_count", 0) or 0),
+            }
+        )
+    return rows
+
+
+def _build_executive_value_risk_matrix(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    work = df.copy()
+    work["prob_bin"] = pd.to_numeric(work["churn_probability"], errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0).round(1)
+    work["expected_renewal_amount"] = pd.to_numeric(work["expected_renewal_amount"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    grouped = (
+        work.groupby(["prob_bin", "expected_renewal_amount", "risk_band"], as_index=False)
+        .agg(
+            user_count=("msno", "nunique"),
+            revenue_at_risk=("expected_revenue_at_risk_30d", "sum"),
+        )
+        .sort_values(["prob_bin", "expected_renewal_amount", "user_count"], ascending=[True, True, False])
+        .reset_index(drop=True)
+    )
+    grouped["risk_tier"] = _to_executive_risk_band(grouped["risk_band"])
+    grouped["display_size"] = np.sqrt(grouped["user_count"].clip(lower=1)).astype("float64")
+    return grouped.to_dict(orient="records")
+
+
+def _build_revenue_flow_sankey(df: pd.DataFrame) -> dict[str, Any]:
+    if df.empty:
+        return {"nodes": [], "links": []}
+
+    renewal_map = {
+        "Pay_Manual": "Thủ công",
+        "Pay_Auto-Renew": "Tự động",
+    }
+    rfm_map = {
+        "High Value": "RFM: Cao",
+        "Mid Value": "RFM: Vừa",
+        "Low Value": "RFM: Thấp",
+        "Unclassified": "RFM: Khác",
+    }
+    price_map = {
+        "Free Trial / Zero Pay": "Dùng thử",
+        "Deal Hunter < 4.5": "Săn ưu đãi",
+        "Standard 4.5-6.5": "Tiêu chuẩn",
+        "Premium >= 6.5": "Cao cấp",
+    }
+
+    work = df.copy()
+    work["renewal_bucket"] = work["renewal_segment"].map(renewal_map)
+    work["rfm_bucket"] = work["rfm_segment"].map(rfm_map)
+    work["price_bucket"] = work["price_segment"].map(price_map)
+    work["risk_bucket"] = _to_executive_risk_long_label(work["risk_band"])
+    work = work.dropna(subset=["renewal_bucket", "rfm_bucket", "price_bucket"])
+    work = work[work["risk_bucket"].isin(TAB2_EXECUTIVE_RISK_LONG_LABELS.values())].reset_index(drop=True)
+
+    if work.empty:
+        return {"nodes": [], "links": []}
+
+    node_names = [
+        "Thủ công",
+        "Tự động",
+        "RFM: Cao",
+        "RFM: Vừa",
+        "RFM: Thấp",
+        "RFM: Khác",
+        "Dùng thử",
+        "Săn ưu đãi",
+        "Tiêu chuẩn",
+        "Cao cấp",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["High"],
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Medium"],
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Low"],
+    ]
+    node_colors = {
+        "Thủ công": "#1f2937",
+        "Tự động": "#94a3b8",
+        "RFM: Cao": "#64748b",
+        "RFM: Vừa": "#94a3b8",
+        "RFM: Thấp": "#cbd5e1",
+        "RFM: Khác": "#e2e8f0",
+        "Dùng thử": "#38bdf8",
+        "Săn ưu đãi": "#f59e0b",
+        "Tiêu chuẩn": "#0f766e",
+        "Cao cấp": "#1d4ed8",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Low"]: "#10b981",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Medium"]: "#f59e0b",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["High"]: "#ef4444",
+    }
+    node_index = {name: idx for idx, name in enumerate(node_names)}
+
+    def grouped_links(source_col: str, target_col: str) -> list[dict[str, Any]]:
+        grouped = (
+            work.groupby([source_col, target_col], as_index=False)
+            .agg(value=("expected_revenue_at_risk_30d", "sum"))
+            .sort_values("value", ascending=False)
+            .reset_index(drop=True)
+        )
+        return [
+            {
+                "source": node_index[str(row[source_col])],
+                "target": node_index[str(row[target_col])],
+                "value": float(row["value"]),
+            }
+            for _, row in grouped.iterrows()
+            if float(row["value"]) > 0
+        ]
+
+    return {
+        "nodes": [{"name": name, "color": node_colors.get(name)} for name in node_names],
+        "links": [
+            *grouped_links("renewal_bucket", "rfm_bucket"),
+            *grouped_links("rfm_bucket", "price_bucket"),
+            *grouped_links("price_bucket", "risk_bucket"),
+        ],
+    }
+
+
+def _build_price_paradox(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    price_map = {
+        "Free Trial / Zero Pay": "Dùng thử (0đ)",
+        "Deal Hunter < 4.5": "Săn ưu đãi",
+        "Standard 4.5-6.5": "Gói Tiêu chuẩn",
+        "Premium >= 6.5": "Gói Cao cấp",
+    }
+    work = df.copy()
+    work["price_bucket"] = work["price_segment"].map(price_map)
+    work = work.dropna(subset=["price_bucket"]).reset_index(drop=True)
+    if work.empty:
+        return []
+
+    grouped = (
+        work.groupby("price_bucket", as_index=False)
+        .agg(
+            user_count=("msno", "nunique"),
+            revenue_at_risk=("expected_revenue_at_risk_30d", "sum"),
+            churn_rate_pct=("churn_probability", lambda s: float(s.mean() * 100.0)),
+        )
+    )
+    order = {"Dùng thử (0đ)": 0, "Săn ưu đãi": 1, "Gói Tiêu chuẩn": 2, "Gói Cao cấp": 3}
+    grouped["sort_key"] = grouped["price_bucket"].map(order).fillna(99)
+    grouped = grouped.sort_values("sort_key").drop(columns=["sort_key"]).reset_index(drop=True)
+    return grouped.to_dict(orient="records")
+
+
+def _build_habit_funnel(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    active_map = {
+        "Heavy > 15 logs": "1. Nhóm Nhiệt huyết (>15 ngày active)",
+        "Active 6-15 logs": "2. Nhóm Ổn định (6-15 ngày active)",
+        "Light 1-5 logs": "3. Nhóm Nguội lạnh (1-5 ngày active)",
+    }
+    work = df.copy()
+    work["habit_stage"] = work["active_segment"].map(active_map)
+    work = work.dropna(subset=["habit_stage"]).reset_index(drop=True)
+    if work.empty:
+        return []
+
+    grouped = (
+        work.groupby("habit_stage", as_index=False)
+        .agg(
+            user_count=("msno", "nunique"),
+            revenue_at_risk=("expected_revenue_at_risk_30d", "sum"),
+        )
+    )
+    order = {
+        "1. Nhóm Nhiệt huyết (>15 ngày active)": 0,
+        "2. Nhóm Ổn định (6-15 ngày active)": 1,
+        "3. Nhóm Nguội lạnh (1-5 ngày active)": 2,
+    }
+    grouped["sort_key"] = grouped["habit_stage"].map(order).fillna(99)
+    grouped = grouped.sort_values("sort_key").drop(columns=["sort_key"]).reset_index(drop=True)
+
+    top_users = max(int(grouped["user_count"].max()), 1)
+    grouped["share_of_top_pct"] = grouped["user_count"] / top_users * 100.0
+    return grouped.to_dict(orient="records")
+
+
 def _build_forecast_decay(df: pd.DataFrame) -> list[dict[str, Any]]:
     if df.empty or "price_segment" not in df.columns:
         return []
@@ -388,8 +1965,10 @@ def _build_forecast_decay(df: pd.DataFrame) -> list[dict[str, Any]]:
 def _zero_predictive_kpis() -> dict[str, Any]:
     return {
         "forecasted_churn_rate": 0.0,
+        "high_flight_risk_users": 0,
         "predicted_revenue_at_risk": 0.0,
         "predicted_total_future_cltv": 0.0,
+        "safe_revenue": 0.0,
         "top_segment": "N/A",
         "top_segment_risk": 0.0,
         "top_segment_user_count": 0,
@@ -401,12 +1980,14 @@ def _compute_predictive_kpis(df: pd.DataFrame, matrix_rows: list[dict[str, Any]]
     if df.empty:
         return _zero_predictive_kpis()
 
-    total_users = max(len(df), 1)
     top = matrix_rows[0] if matrix_rows else None
+    high_risk_mask = pd.to_numeric(df["churn_probability"], errors="coerce").fillna(0.0) >= 0.60
     return {
-        "forecasted_churn_rate": float(df["churn_probability"].mean() * 100.0),
+        "forecasted_churn_rate": float(high_risk_mask.mean() * 100.0),
+        "high_flight_risk_users": int(high_risk_mask.sum()),
         "predicted_revenue_at_risk": float(df["expected_revenue_at_risk_30d"].sum()),
         "predicted_total_future_cltv": float(df["expected_retained_revenue_30d"].sum()),
+        "safe_revenue": float(df["expected_retained_revenue_30d"].sum()),
         "top_segment": str(top["strategic_segment"]) if top else "N/A",
         "top_segment_risk": float(top["revenue_at_risk"]) if top else 0.0,
         "top_segment_user_count": int(top["user_count"]) if top else 0,
@@ -418,30 +1999,38 @@ def build_tab2_predictive_payload(
     month_start: date,
     segment_type: Optional[str] = None,
     segment_value: Optional[str] = None,
+    sample_limit: Optional[int] = None,
     root_hint: str | Path | None = None,
+    prefer_cache: bool = True,
 ) -> dict[str, Any]:
     target_month = month_start_to_yyyymm(month_start)
     tab2_dir = resolve_tab2_artifacts_dir(root_hint=root_hint, score_month=target_month)
-    scored_df = _load_tab2_scored_df(tab2_dir, target_month)
+    if prefer_cache and sample_limit in (None, 0):
+        cache_path = _tab2_payload_cache_path(
+            tab2_dir,
+            target_month=target_month,
+            segment_type=segment_type,
+            segment_value=segment_value,
+        )
+        if cache_path.exists():
+            return read_json_copy(cache_path)
+    summary_df = _load_tab2_segment_summary_df(tab2_dir, target_month)
+    scored_df = _load_tab2_scored_df(tab2_dir, target_month, columns=TAB2_SCORE_COLUMNS)
     metrics = read_json_copy(tab2_dir / "tab2_validation_metrics.json")
     model_summary = read_json_copy(tab2_dir / "tab2_model_summary.json")
-    filtered = _filter_by_segment(scored_df, segment_type, segment_value)
+    try:
+        feature_importance_df = _load_tab2_feature_importance_df(tab2_dir)
+    except FileNotFoundError:
+        feature_importance_df = pd.DataFrame(columns=["feature", "importance_gain", "importance_split", "feature_group"])
+    filtered_summary = _filter_artifact_segment_summary(summary_df, "bi_segment_name", segment_type, segment_value)
+    filtered_scored = _filter_by_segment(scored_df, segment_type, segment_value)
 
-    matrix_rows = _build_predictive_matrix(filtered)
-    current_kpis = _compute_predictive_kpis(filtered, matrix_rows)
+    matrix_rows = _build_predictive_matrix_from_segment_summary(filtered_summary)
+    executive_matrix_rows = _build_executive_value_risk_matrix(filtered_scored)
+    current_kpis = _compute_predictive_kpis(filtered_scored, matrix_rows)
 
     previous_month = previous_yyyymm(target_month)
-    previous_df: pd.DataFrame | None = None
-    try:
-        previous_df = _filter_by_segment(_load_tab2_scored_df(tab2_dir, previous_month), segment_type, segment_value)
-    except FileNotFoundError:
-        previous_df = None
-
-    previous_kpis = (
-        _compute_predictive_kpis(previous_df, _build_predictive_matrix(previous_df))
-        if previous_df is not None and not previous_df.empty
-        else _zero_predictive_kpis()
-    )
+    previous_kpis = _build_previous_predictive_kpis_from_metrics(metrics)
     current_kpis["forecasted_churn_delta_pp_vs_prev_month"] = (
         current_kpis["forecasted_churn_rate"] - previous_kpis["forecasted_churn_rate"]
     )
@@ -450,10 +2039,14 @@ def build_tab2_predictive_payload(
         "meta": {
             "month": yyyymm_to_label(target_month),
             "previous_month": yyyymm_to_label(previous_month),
-            "sample_user_count": int(len(filtered)),
+            "sample_user_count": int(
+                model_summary.get("scored_test_rows", 0)
+                if not segment_type and not segment_value
+                else (filtered_summary["users"].sum() if not filtered_summary.empty else 0)
+            ),
             "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
             "artifact_dir": str(tab2_dir),
-            "artifact_mode": "model_backed",
+            "artifact_mode": "summary_backed",
         },
         "model_params": {
             **deepcopy(DEFAULT_MODEL_PARAMS),
@@ -464,25 +2057,38 @@ def build_tab2_predictive_payload(
         "kpis": current_kpis,
         "previous_kpis": previous_kpis,
         "value_risk_matrix": matrix_rows,
-        "revenue_leakage": _build_revenue_leakage(filtered),
-        "forecast_decay": _build_forecast_decay(filtered),
+        "executive_value_risk_matrix": executive_matrix_rows,
+        "revenue_leakage": _build_revenue_leakage(filtered_scored),
+        "forecast_decay": _build_forecast_decay(filtered_scored),
         "prescriptions": matrix_rows[:200],
-        "feature_group_importance": model_summary.get("top_feature_groups", []),
+        "risk_band_mix": _build_risk_band_mix(filtered_scored),
+        "feature_group_waterfall": _build_feature_group_waterfall(
+            feature_importance_df,
+            float(current_kpis["predicted_revenue_at_risk"]),
+        ),
+        "revenue_flow_sankey": _build_revenue_flow_sankey(filtered_scored),
+        "price_paradox": _build_price_paradox(filtered_scored),
+        "habit_funnel": _build_habit_funnel(filtered_scored),
+        "feature_group_importance": feature_importance_df.to_dict(orient="records"),
     }
 
 
-def load_feature_snapshot(feature_store_dir: str | Path, score_month: int) -> pd.DataFrame:
+def load_feature_snapshot(
+    feature_store_dir: str | Path,
+    score_month: int,
+    columns: Iterable[str] | None = None,
+) -> pd.DataFrame:
     feature_store_dir = Path(feature_store_dir)
     score_path = feature_store_dir / f"test_features_bi_{score_month}_full.parquet"
     if score_path.exists():
-        df = read_parquet_copy(score_path)
+        df = read_parquet_copy(score_path, columns=columns)
         if "target_month" in df.columns:
             df = df[df["target_month"] == score_month].reset_index(drop=True)
         return df
 
     master_path = feature_store_dir / "bi_feature_master.parquet"
     if master_path.exists():
-        df = read_parquet_copy(master_path)
+        df = read_parquet_copy(master_path, columns=columns)
         return df[df["target_month"] == score_month].reset_index(drop=True)
 
     raise FileNotFoundError(
@@ -850,8 +2456,24 @@ def _cached_baseline_frame(
     tab2_dir_text: str,
     target_month: int,
 ) -> pd.DataFrame:
-    feature_df = load_feature_snapshot(feature_store_dir_text, target_month)
-    scored_df = _load_tab2_scored_df(Path(tab2_dir_text), target_month)
+    feature_df = load_feature_snapshot(feature_store_dir_text, target_month, columns=FEATURE_SNAPSHOT_COLUMNS)
+    scored_df = _load_tab2_scored_df(Path(tab2_dir_text), target_month, columns=TAB3_SCORED_COLUMNS)
+    return _prepare_baseline_dataframe(feature_df, scored_df)
+
+
+def _build_baseline_frame(
+    feature_store_dir_text: str,
+    tab2_dir_text: str,
+    target_month: int,
+    sample_limit: Optional[int],
+) -> pd.DataFrame:
+    if sample_limit is None or sample_limit <= 0:
+        return _cached_baseline_frame(feature_store_dir_text, tab2_dir_text, target_month).copy()
+
+    feature_df = load_feature_snapshot(feature_store_dir_text, target_month, columns=FEATURE_SNAPSHOT_COLUMNS)
+    scored_df = _load_tab2_scored_df(Path(tab2_dir_text), target_month, columns=TAB3_SCORED_COLUMNS)
+    scored_df = _apply_sample_limit(scored_df, sample_limit)
+    feature_df = feature_df[feature_df["msno"].isin(scored_df["msno"])].reset_index(drop=True)
     return _prepare_baseline_dataframe(feature_df, scored_df)
 
 
@@ -875,15 +2497,100 @@ def _sensitivity_payload(sensitivity_df: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
+def _default_monte_carlo_payload() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "artifact_dir": None,
+        "n_iterations": 0,
+        "seed": None,
+        "beta_concentration": None,
+        "population_users": 0,
+        "simulation_unit_count": 0,
+        "probability_scenario_beats_baseline": None,
+        "probability_net_positive": None,
+        "deterministic_summary": {},
+        "summary_metrics": [],
+    }
+
+
+def _build_monte_carlo_payload(mc_dir: Path, target_month: int) -> dict[str, Any]:
+    summary = read_json_copy(mc_dir / f"tab3_monte_carlo_summary_{target_month}.json")
+    deterministic = read_json_copy(mc_dir / f"tab3_deterministic_summary_{target_month}.json")
+    manifest = read_json_copy(mc_dir / "manifest.json")
+    metrics_map = summary.get("monte_carlo_metrics", {})
+    metric_label_map = {
+        "baseline_retained_revenue_30d": "Baseline Revenue",
+        "scenario_retained_revenue_30d": "Scenario Revenue",
+        "incremental_upsell_revenue_30d": "Incremental Upsell Revenue",
+        "saved_revenue_from_risk_reduction_30d": "Saved Revenue from Risk Reduction",
+        "campaign_cost_30d": "Campaign Cost",
+        "net_value_after_cost_30d": "Net Value After Cost",
+        "baseline_churn_prob_pct": "Baseline Churn %",
+        "scenario_churn_prob_pct": "Scenario Churn %",
+    }
+    metric_order = [
+        "baseline_retained_revenue_30d",
+        "scenario_retained_revenue_30d",
+        "incremental_upsell_revenue_30d",
+        "saved_revenue_from_risk_reduction_30d",
+        "campaign_cost_30d",
+        "net_value_after_cost_30d",
+        "baseline_churn_prob_pct",
+        "scenario_churn_prob_pct",
+    ]
+    ordered_keys = [key for key in metric_order if key in metrics_map] + [
+        key for key in metrics_map.keys() if key not in metric_order
+    ]
+    summary_metrics = []
+    for key in ordered_keys:
+        value = metrics_map.get(key, {})
+        if not isinstance(value, dict):
+            continue
+        summary_metrics.append(
+            {
+                "metric": metric_label_map.get(key, key),
+                "column": key,
+                "mean": float(value.get("mean", 0.0)),
+                "std": float(value.get("std", 0.0)),
+                "p05": float(value.get("p05", 0.0)),
+                "p25": float(value.get("p25", 0.0)),
+                "p50": float(value.get("p50", 0.0)),
+                "p75": float(value.get("p75", 0.0)),
+                "p95": float(value.get("p95", 0.0)),
+            }
+        )
+
+    return {
+        "enabled": True,
+        "artifact_dir": str(mc_dir),
+        "n_iterations": int(summary.get("n_iterations", 0)),
+        "seed": int(summary.get("seed", 0)) if summary.get("seed") is not None else None,
+        "beta_concentration": float(summary.get("beta_concentration", 0.0))
+        if summary.get("beta_concentration") is not None
+        else None,
+        "population_users": int(manifest.get("metadata", {}).get("population_users", 0)),
+        "simulation_unit_count": int(manifest.get("metadata", {}).get("simulation_unit_count", 0)),
+        "probability_scenario_beats_baseline": float(summary.get("probability_scenario_beats_baseline", 0.0)),
+        "probability_net_positive": float(summary.get("probability_net_positive", 0.0)),
+        "deterministic_summary": deterministic,
+        "summary_metrics": summary_metrics,
+    }
+
+
 def _risk_histogram_payload(risk_shift_df: pd.DataFrame) -> list[dict[str, Any]]:
     if risk_shift_df.empty:
         return []
-    base = risk_shift_df[risk_shift_df["state"] == "baseline"].set_index("probability_bin")["users"]
-    scenario = risk_shift_df[risk_shift_df["state"] == "simulated"].set_index("probability_bin")["users"]
+    scoped = risk_shift_df[risk_shift_df["bin_type"].fillna("probability_bin").astype(str) == "probability_bin"].copy()
+    if scoped.empty:
+        return []
+    base = scoped[scoped["state"] == "baseline"].set_index("probability_bin")["users"]
+    scenario = scoped[scoped["state"] == "simulated"].set_index("probability_bin")["users"]
     total_base = max(float(base.sum()), 1.0)
     total_scenario = max(float(scenario.sum()), 1.0)
     rows: list[dict[str, Any]] = []
     for label in sorted(set(base.index).union(set(scenario.index))):
+        if "-" not in str(label):
+            continue
         start_text, end_text = str(label).split("-")
         rows.append(
             {
@@ -901,79 +2608,124 @@ def build_tab3_prescriptive_payload(
     *,
     segment_type: Optional[str] = None,
     segment_value: Optional[str] = None,
+    scenario_id: Optional[str] = None,
     feature_store_root_hint: str | Path | None = None,
     tab2_root_hint: str | Path | None = None,
+    sample_limit: Optional[int] = None,
     auto_shift_pct: float = 20.0,
     upsell_shift_pct: float = 15.0,
     skip_shift_pct: float = 25.0,
 ) -> dict[str, Any]:
     target_month = month_start_to_yyyymm(month_start)
-    feature_store_dir = resolve_feature_store_dir(root_hint=feature_store_root_hint, score_month=target_month)
-    tab2_dir = resolve_tab2_artifacts_dir(root_hint=tab2_root_hint, score_month=target_month)
-    tab3_dir = resolve_tab3_artifacts_dir(root_hint=tab2_root_hint, score_month=target_month)
-    baseline_df = _cached_baseline_frame(str(feature_store_dir), str(tab2_dir), target_month).copy()
-    filtered = _filter_by_segment(baseline_df, segment_type, segment_value)
-
-    if filtered.empty:
-        return {
-            "meta": {
-                "month": yyyymm_to_label(target_month),
-                "sample_user_count": 0,
-                "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
-                "artifact_mode": "model_backed",
-                "artifact_dir": str(tab3_dir),
-            },
-            "model_params": {**deepcopy(DEFAULT_MODEL_PARAMS), "source_mode": "artifact_backed"},
-            "scenario_inputs": {
-                "auto_shift_pct": float(auto_shift_pct),
-                "upsell_shift_pct": float(upsell_shift_pct),
-                "skip_shift_pct": float(skip_shift_pct),
-            },
-            "kpis": {
-                "baseline_avg_hazard": 0.0,
-                "scenario_avg_hazard": 0.0,
-                "baseline_churn_prob_pct": 0.0,
-                "scenario_churn_prob_pct": 0.0,
-                "optimized_projected_revenue": 0.0,
-                "baseline_revenue": 0.0,
-                "saved_revenue": 0.0,
-                "incremental_upsell": 0.0,
-            },
-            "hazard_histogram": [],
-            "financial_waterfall": [],
-            "sensitivity_roi": [],
-        }
-
-    scenario_config = _normalize_config(
-        {
-            "manual_to_auto_share": auto_shift_pct / 100.0,
-            "upsell_share": upsell_shift_pct / 100.0,
-            "engagement_share": skip_shift_pct / 100.0,
-        }
+    tab3_root = resolve_tab3_artifacts_dir(root_hint=tab2_root_hint, score_month=target_month)
+    prescriptive_catalog = _load_tab3_scenario_catalog(tab3_root)
+    tab3_dir, selected_scenario = _resolve_tab3_case_dir(
+        tab3_root,
+        score_month=target_month,
+        scenario_id=scenario_id,
+        catalog=prescriptive_catalog,
+        required_files=_required_tab3_prescriptive_files(target_month),
+        subdir_field="artifact_subdir",
     )
-    lever_parameters = estimate_lever_parameters(filtered)
-    member_level_df = simulate_prescriptive_scenario(
-        filtered,
-        scenario_config=scenario_config,
-        lever_parameters=lever_parameters,
+    summary = _load_tab3_scenario_summary(tab3_dir, target_month)
+    risk_shift_df = _load_tab3_population_risk_shift_df(tab3_dir, target_month)
+    sensitivity_df = _load_tab3_sensitivity_df(tab3_dir, target_month)
+
+    monte_carlo_catalog = None
+    try:
+        mc_root = resolve_tab3_monte_carlo_dir(root_hint=tab2_root_hint, score_month=target_month)
+        monte_carlo_catalog = _load_tab3_scenario_catalog(mc_root)
+        mc_dir, _ = _resolve_tab3_case_dir(
+            mc_root,
+            score_month=target_month,
+            scenario_id=(selected_scenario or {}).get("scenario_id") if selected_scenario else scenario_id,
+            catalog=monte_carlo_catalog,
+            required_files=_required_tab3_monte_carlo_files(target_month),
+            subdir_field="monte_carlo_subdir",
+        )
+        monte_carlo = _build_monte_carlo_payload(mc_dir, target_month)
+    except (FileNotFoundError, ValueError):
+        mc_dir = None
+        monte_carlo = _default_monte_carlo_payload()
+
+    scenario_config = _normalize_config(summary.get("scenario_config", {}))
+    if monte_carlo.get("enabled"):
+        deterministic_summary = monte_carlo.get("deterministic_summary", {})
+        if deterministic_summary:
+            baseline_churn_pct = deterministic_summary.get(
+                "baseline_churn_prob_pct",
+                deterministic_summary.get("baseline_avg_churn_probability", 0.0) * 100.0,
+            )
+            scenario_churn_pct = deterministic_summary.get(
+                "scenario_churn_prob_pct",
+                deterministic_summary.get("simulated_avg_churn_probability", 0.0) * 100.0,
+            )
+            summary["baseline_avg_churn_probability"] = float(baseline_churn_pct) / 100.0
+            summary["simulated_avg_churn_probability"] = float(scenario_churn_pct) / 100.0
+            summary["baseline_retained_revenue_30d"] = float(
+                deterministic_summary.get("baseline_retained_revenue_30d", summary["baseline_retained_revenue_30d"])
+            )
+            summary["simulated_retained_revenue_30d"] = float(
+                deterministic_summary.get(
+                    "scenario_retained_revenue_30d",
+                    deterministic_summary.get("simulated_retained_revenue_30d", summary["simulated_retained_revenue_30d"]),
+                )
+            )
+            summary["saved_revenue_from_risk_reduction_30d"] = float(
+                deterministic_summary.get(
+                    "saved_revenue_from_risk_reduction_30d", summary["saved_revenue_from_risk_reduction_30d"]
+                )
+            )
+            summary["incremental_upsell_revenue_30d"] = float(
+                deterministic_summary.get("incremental_upsell_revenue_30d", summary["incremental_upsell_revenue_30d"])
+            )
+            summary["campaign_cost_30d"] = float(
+                deterministic_summary.get("campaign_cost_30d", summary["campaign_cost_30d"])
+            )
+            summary["net_value_after_cost_30d"] = float(
+                deterministic_summary.get("net_value_after_cost_30d", summary["net_value_after_cost_30d"])
+            )
+            summary["retained_revenue_delta_30d"] = (
+                summary["simulated_retained_revenue_30d"] - summary["baseline_retained_revenue_30d"]
+            )
+
+    available_scenarios = _build_tab3_scenario_options(
+        selected_entry=selected_scenario,
+        selected_summary=summary,
+        prescriptive_catalog=prescriptive_catalog,
+        monte_carlo_catalog=monte_carlo_catalog,
+        monte_carlo_enabled=bool(monte_carlo.get("enabled")),
     )
-    summary = summarize_scenario(member_level_df, scenario_config, lever_parameters)
-    risk_shift_df = build_population_risk_shift(member_level_df)
-    sensitivity_df = build_sensitivity_table(filtered, lever_parameters=lever_parameters)
+    selected_scenario_id = (
+        str((selected_scenario or {}).get("scenario_id") or available_scenarios[0]["scenario_id"])
+        if available_scenarios
+        else DEFAULT_TAB3_SCENARIO_ID
+    )
+    selected_scenario_label = (
+        str((selected_scenario or {}).get("label") or available_scenarios[0]["label"])
+        if available_scenarios
+        else "Default scenario"
+    )
+    selected_scenario_description = (selected_scenario or {}).get("description")
 
     return {
         "meta": {
             "month": yyyymm_to_label(target_month),
-            "sample_user_count": int(len(member_level_df)),
+            "sample_user_count": int(summary.get("population_users", monte_carlo.get("population_users", 0) or 0)),
             "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
-            "artifact_mode": "model_backed",
+            "artifact_mode": "summary_backed",
             "artifact_dir": str(tab3_dir),
+            "monte_carlo_artifact_dir": str(mc_dir) if mc_dir is not None else None,
+            "scenario_id": selected_scenario_id,
+            "scenario_label": selected_scenario_label,
+            "scenario_description": selected_scenario_description,
+            "available_scenarios": available_scenarios,
         },
         "model_params": {**deepcopy(DEFAULT_MODEL_PARAMS), "source_mode": "artifact_backed"},
         "scenario_inputs": {
-            "auto_shift_pct": float(auto_shift_pct),
-            "upsell_shift_pct": float(upsell_shift_pct),
-            "skip_shift_pct": float(skip_shift_pct),
+            "auto_shift_pct": float(scenario_config.get("manual_to_auto_share", 0.0) * 100.0),
+            "upsell_shift_pct": float(scenario_config.get("upsell_share", 0.0) * 100.0),
+            "skip_shift_pct": float(scenario_config.get("engagement_share", 0.0) * 100.0),
         },
         "kpis": {
             "baseline_avg_hazard": float(summary["baseline_avg_churn_probability"]),
@@ -984,13 +2736,18 @@ def build_tab3_prescriptive_payload(
             "baseline_revenue": float(summary["baseline_retained_revenue_30d"]),
             "saved_revenue": float(summary["saved_revenue_from_risk_reduction_30d"]),
             "incremental_upsell": float(summary["incremental_upsell_revenue_30d"]),
+            "campaign_cost": float(summary["campaign_cost_30d"]),
+            "net_value_after_cost": float(summary["net_value_after_cost_30d"]),
         },
         "hazard_histogram": _risk_histogram_payload(risk_shift_df),
         "financial_waterfall": [
             {"name": "Current Baseline Revenue", "value": float(summary["baseline_retained_revenue_30d"])},
             {"name": "Saved Revenue from Retention", "value": float(summary["saved_revenue_from_risk_reduction_30d"])},
             {"name": "Incremental Revenue from Upsell", "value": float(summary["incremental_upsell_revenue_30d"])},
-            {"name": "Optimized Projected Revenue", "value": float(summary["simulated_retained_revenue_30d"])},
+            {"name": "Scenario Revenue", "value": float(summary["simulated_retained_revenue_30d"])},
+            {"name": "Campaign Cost", "value": float(-summary["campaign_cost_30d"])},
+            {"name": "Net Value After Cost", "value": float(summary["net_value_after_cost_30d"])},
         ],
         "sensitivity_roi": _sensitivity_payload(sensitivity_df),
+        "monte_carlo": monte_carlo,
     }

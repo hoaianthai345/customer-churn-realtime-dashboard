@@ -1,6 +1,6 @@
-# Realtime BI Demo (Kafka + Spark + ClickHouse + FastAPI + Next.js)
+# Realtime BI Demo (Kafka + Spark + ClickHouse + FastAPI + Vite React)
 
-Near real-time BI pipeline where static datasets are preloaded into ClickHouse and historical `user_logs` are replayed into Kafka for realtime simulation, then Spark Structured Streaming computes KPIs, FastAPI serves APIs/WebSocket, and Next.js visualizes results.
+Near real-time BI pipeline where static datasets are preloaded into ClickHouse and historical `user_logs` are replayed into Kafka for realtime simulation, then Spark Structured Streaming computes KPIs, FastAPI serves APIs/WebSocket, and the Vite React dashboard visualizes results.
 
 ## 1) Prerequisites
 
@@ -10,7 +10,7 @@ Near real-time BI pipeline where static datasets are preloaded into ClickHouse a
 
 ## 2) Project Flow
 
-`Batch Preload (members + transactions) -> User-log Replay Producer -> Kafka -> Spark Structured Streaming -> ClickHouse -> FastAPI (REST + WebSocket) -> Next.js`
+`Batch Preload (members + transactions) -> User-log Replay Producer -> Kafka -> Spark Structured Streaming -> ClickHouse -> FastAPI (REST + WebSocket) -> Vite React dashboard`
 
 ## 3) Quick Start
 
@@ -26,15 +26,38 @@ Open services:
 - Kafka broker: `localhost:29092`
 - ClickHouse HTTP: `localhost:8123`
 - FastAPI docs endpoint root: `http://localhost:8000/health`
-- Next.js dashboard: `http://localhost:3000`
+- Dashboard UI: `http://localhost:3000`
+
+## 3.1) First Demo Run
+
+Artifact-backed demo mode is the stable path for presentation and does not require Kafka, Spark, or ClickHouse to be live.
+
+```bash
+bash scripts/run_demo.sh
+```
+
+If the demo stack is already up and you only want a readiness check:
+
+```bash
+bash scripts/validate_demo.sh
+```
+
+Demo notes:
+
+- fixed demo month: `2017-04`
+- demo UI runs at `http://localhost:3000`
+- demo API runs at `http://localhost:8000`
+- replay is intentionally disabled in demo mode so the story stays deterministic
 
 ## 4) Main Scripts
 
 - `scripts/setup_local.sh`: Install Python deps and prepare data folders.
 - `scripts/run_pipeline.sh`: Start infra, reuse cached cleaned data, ensure Spark jobs are running, and prepare history layer.
+- `scripts/run_demo.sh`: Start the artifact-backed demo stack and validate that it is presentation-ready.
+- `scripts/validate_demo.sh`: Verify API, frontend, and frontend proxy for the demo stack.
 - `scripts/stop_pipeline.sh`: Stop all containers.
 - `scripts/reset_pipeline.sh`: Stop and delete containers/volumes/checkpoints.
-- `scripts/validate_stack.sh`: Basic health checks for Kafka, ClickHouse, FastAPI, Next.js.
+- `scripts/validate_stack.sh`: Basic health checks for Kafka, ClickHouse, FastAPI, and the frontend dashboard.
 
 ## 5) Producer Commands
 
@@ -101,4 +124,5 @@ docker compose exec spark bash apps/streaming/run/run_all_jobs.sh
 - `docs/architecture_diagrams/architecture.md`: end-to-end runtime architecture.
 - `docs/report_and_slides/kkbox_pipeline_descriptions.md`: pipeline descriptions for report diagrams.
 - `docs/report_and_slides/kkbox_report_diagrams.md`: diagram inventory for report writing and slide presentation.
+- `docs/report_and_slides/demo_script.md`: presentation script and operator checklist for the first artifact-backed demo.
 # customer-churn-realtime-dashboard

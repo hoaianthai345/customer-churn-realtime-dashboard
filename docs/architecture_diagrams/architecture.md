@@ -11,7 +11,7 @@
 7. Replay + Spark update realtime log-driven tables from March 2017 onward.
 8. Batch materializer refreshes Tab 1 realtime base (`realtime_2017_plus`) from fact tables.
 9. FastAPI reads KPI and Tab 1 materialized tables, exposing REST + websocket endpoints.
-10. Next.js consumes API endpoints and renders near real-time dashboards.
+10. The frontend dashboard consumes API endpoints and renders near real-time dashboards.
 
 ## Components
 
@@ -20,7 +20,7 @@
 - ClickHouse: serving layer for low-latency analytics.
 - Batch materializers: prepare Tab 1 descriptive datasets for low-cost querying.
 - FastAPI: backend API and push channel (WebSocket).
-- Next.js: interactive dashboard UI and live update rendering.
+- Frontend dashboard: interactive dashboard UI and live update rendering.
 
 ## Topics
 

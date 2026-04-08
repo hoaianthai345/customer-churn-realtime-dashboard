@@ -1,0 +1,7 @@
+fastapi==0.115.12
+uvicorn==0.30.6
+websockets==12.0
+clickhouse-connect==0.8.18
+pandas==2.2.3
+numpy==2.2.4
+pyarrow==19.0.1
