@@ -2,7 +2,6 @@ import { Fragment, memo, useMemo } from "react";
 import { Filter, Orbit, Sparkles, Waves, type LucideIcon } from "lucide-react";
 import {
   Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -33,7 +32,6 @@ import {
   DEMO_MODE,
   DIMENSION_LABELS,
   SEGMENT_LABELS,
-  bubbleColor,
   buildKmChartData,
   clamp,
   formatCompactCurrency,
@@ -67,6 +65,7 @@ const CHURN_FLOOR_PCT = 0;
 const CHURN_WARNING_PCT = 4.5;
 const CHURN_CRITICAL_PCT = 5.5;
 const CHURN_DONUT_COLORS = ["#10b981", "#ef4444"];
+const BEHAVIOR_CLUSTER_COLORS = ["#0f172a", "#1d4ed8", "#2563eb", "#60a5fa", "#93c5fd"];
 
 function DescriptiveTab({
   data,
@@ -96,8 +95,17 @@ function DescriptiveTab({
           Math.max(0, Math.round(Number(point.churned_users ?? (totalUsers * churnRate) / 100))),
         );
         const newPaidUsers = point.new_paid_users == null ? null : Math.max(Number(point.new_paid_users), 0);
+        const totalExpectedRenewalAmount =
+          point.total_expected_renewal_amount == null ? null : Math.max(Number(point.total_expected_renewal_amount), 0);
         return {
           ...point,
+          total_expected_renewal_amount: totalExpectedRenewalAmount,
+          historical_revenue_at_risk:
+            point.historical_revenue_at_risk == null
+              ? totalExpectedRenewalAmount == null
+                ? null
+                : (totalExpectedRenewalAmount * churnRate) / 100
+              : Math.max(Number(point.historical_revenue_at_risk), 0),
           churned_users: churnedUsers,
           renewed_users: Math.max(totalUsers - churnedUsers, 0),
           new_paid_users: newPaidUsers,
@@ -108,9 +116,12 @@ function DescriptiveTab({
     [monthlyTrend],
   );
   const hasMultiMonthTrend = trendSeries.length > 1;
-  const hasRevenueTrend = trendSeries.some((point) => point.total_expected_renewal_amount != null);
+  const hasRevenueTrend = trendSeries.some(
+    (point) => point.total_expected_renewal_amount != null || point.historical_revenue_at_risk != null,
+  );
   const hasApruTrend = trendSeries.some((point) => point.apru != null);
   const hasNewVsChurnTrend = trendSeries.some((point) => point.new_paid_users != null);
+  const latestRevenueRiskPoint = trendSeries[trendSeries.length - 1] ?? null;
 
   const segmentGroups = useMemo(() => {
     const grouped: Record<keyof typeof SEGMENT_LABELS, Array<Tab1Payload["segment_mix"][number]>> = {
@@ -139,7 +150,23 @@ function DescriptiveTab({
     [data?.segment_mix],
   );
   const riskiestBehavior = useMemo(
-    () => [...(data?.boredom_scatter ?? [])].sort((a, b) => Number(b.churn_rate_pct) - Number(a.churn_rate_pct))[0] ?? null,
+    () =>
+      [...(data?.boredom_scatter ?? [])].sort(
+        (a, b) =>
+          Number(b.revenue_at_risk ?? 0) - Number(a.revenue_at_risk ?? 0) ||
+          Number(b.churn_rate_pct) - Number(a.churn_rate_pct),
+      )[0] ?? null,
+    [data?.boredom_scatter],
+  );
+  const behaviorFocusPoints = useMemo(
+    () =>
+      [...(data?.boredom_scatter ?? [])]
+        .sort(
+          (a, b) =>
+            Number(b.revenue_at_risk ?? 0) - Number(a.revenue_at_risk ?? 0) ||
+            Number(b.users ?? 0) - Number(a.users ?? 0),
+        )
+        .slice(0, 5),
     [data?.boredom_scatter],
   );
   const selectedFilterLabel =
@@ -209,11 +236,11 @@ function DescriptiveTab({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_340px]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.72fr)_320px] 2xl:grid-cols-[minmax(0,1.58fr)_360px]">
         <ChartCard
-          title="Nhóm nào đang rơi nhanh nhất?"
-          subtitle="Nhìn vào một biểu đồ trung tâm để thấy nhóm khách nào mất giữ chân nhanh hơn phần còn lại trong tháng đang xem."
-          className="min-h-[300px]"
+          title="Tốc độ rời bỏ khách hàng theo thời gian"
+          subtitle="Mỗi đường là một nhóm khách. Đường nào dốc xuống nhanh hơn thì nhóm đó rời đi sớm hơn trong thực tế kinh doanh."
+          className="min-h-[360px]"
         >
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -223,8 +250,11 @@ function DescriptiveTab({
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{selectedFilterLabel}</span>
             ) : null}
           </div>
+          <div className="mb-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+            Đường dốc xuống càng nhanh thì khách hàng rời bỏ càng sớm. Nhìn vào nhóm rơi nhanh nhất để ưu tiên hành động trước.
+          </div>
           {kmData.length ? (
-            <ResponsiveContainer width="100%" height={258}>
+            <ResponsiveContainer width="100%" height={312}>
               <LineChart data={kmData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                 <XAxis dataKey="day" tick={{ fontSize: 12 }} />
@@ -320,10 +350,10 @@ function DescriptiveTab({
             <ExecutiveSignal
               icon={Orbit}
               title="Tín hiệu hành vi xấu"
-              value={riskiestBehavior ? formatPct(Number(riskiestBehavior.churn_rate_pct), 1) : "Chưa rõ"}
+              value={riskiestBehavior ? formatCompactCurrency(Number(riskiestBehavior.revenue_at_risk ?? 0)) : "Chưa rõ"}
               detail={
                 riskiestBehavior
-                  ? `Khám phá ${riskiestBehavior.discovery_ratio.toFixed(2)} • bỏ qua ${riskiestBehavior.skip_ratio.toFixed(2)}`
+                  ? `${riskiestBehavior.cluster_label ?? "Cụm hành vi"} • ${formatNumber(riskiestBehavior.users)} khách • ${formatPct(Number(riskiestBehavior.churn_rate_pct), 1)} rời bỏ`
                   : "Chưa đủ dữ liệu hành vi để xác định vùng chán dịch vụ"
               }
             />
@@ -333,13 +363,13 @@ function DescriptiveTab({
 
       {hasMultiMonthTrend ? (
         <>
-          <div className="grid gap-5 xl:grid-cols-3">
+          <div className="grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
             <ChartCard
               title="Expiring Subscriber Trend"
               subtitle={`Bám theo chart quy mô khách sắp hết hạn trong file mẫu. ${trendScopeNote}`}
-              className="min-h-[300px]"
+              className="min-h-[340px]"
             >
-              <ResponsiveContainer width="100%" height={258}>
+              <ResponsiveContainer width="100%" height={292}>
                 <BarChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                   <XAxis dataKey="month_label" tick={{ fontSize: 12 }} tickFormatter={(value) => formatMonthLabel(String(value))} />
@@ -354,13 +384,23 @@ function DescriptiveTab({
             </ChartCard>
 
             <ChartCard
-              title="Revenue Trend"
-              subtitle="Tổng doanh thu kỳ vọng theo tháng của nhóm khách sắp hết hạn."
-              className="min-h-[300px]"
+              title="Doanh thu sắp gia hạn và phần đang bị đe dọa"
+              subtitle="Vùng xanh là doanh thu sắp gia hạn. Đường đỏ cho thấy phần doanh thu lịch sử dễ mất nếu xu hướng rời bỏ lặp lại."
+              action={
+                latestRevenueRiskPoint?.historical_revenue_at_risk != null ? (
+                  <div className="rounded-full bg-rose-50 px-3 py-1.5 text-right">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-600">At risk</div>
+                    <div className="text-sm font-semibold text-rose-700">
+                      {formatCompactCurrency(Number(latestRevenueRiskPoint.historical_revenue_at_risk))}
+                    </div>
+                  </div>
+                ) : null
+              }
+              className="min-h-[340px]"
             >
               {hasRevenueTrend ? (
-                <ResponsiveContainer width="100%" height={258}>
-                  <AreaChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
+                <ResponsiveContainer width="100%" height={292}>
+                  <ComposedChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                     <defs>
                       <linearGradient id="descriptiveRevenueTrend" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#2563eb" stopOpacity={0.28} />
@@ -372,17 +412,30 @@ function DescriptiveTab({
                     <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => formatCompactCurrency(Number(value))} />
                     <Tooltip
                       labelFormatter={(value) => formatMonthLabel(String(value))}
-                      formatter={(value: number) => [formatCurrency(Number(value)), "Doanh thu kỳ vọng"]}
+                      formatter={(value: number, name: string) => {
+                        if (name === "historical_revenue_at_risk") {
+                          return [formatCurrency(Number(value)), "Doanh thu bị đe dọa"];
+                        }
+                        return [formatCurrency(Number(value)), "Doanh thu sắp gia hạn"];
+                      }}
                     />
                     <Area
                       type="monotone"
                       dataKey="total_expected_renewal_amount"
-                      name="Doanh thu kỳ vọng"
+                      name="Doanh thu sắp gia hạn"
                       stroke="#2563eb"
                       fill="url(#descriptiveRevenueTrend)"
                       strokeWidth={2.5}
                     />
-                  </AreaChart>
+                    <Line
+                      type="monotone"
+                      dataKey="historical_revenue_at_risk"
+                      name="Doanh thu bị đe dọa"
+                      stroke="#dc2626"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: "#dc2626" }}
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               ) : (
                 <StatePanel title="Chưa có revenue trend" description="Nguồn hiện tại chưa trả về chuỗi doanh thu kỳ vọng theo tháng." />
@@ -392,10 +445,10 @@ function DescriptiveTab({
             <ChartCard
               title="APRU Trend"
               subtitle="APRU theo tháng của nhóm khách sắp hết hạn, giữ cùng ý đồ đọc nhanh như mẫu HTML."
-              className="min-h-[300px]"
+              className="min-h-[340px]"
             >
               {hasApruTrend ? (
-                <ResponsiveContainer width="100%" height={258}>
+                <ResponsiveContainer width="100%" height={292}>
                   <LineChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                     <XAxis dataKey="month_label" tick={{ fontSize: 12 }} tickFormatter={(value) => formatMonthLabel(String(value))} />
@@ -413,13 +466,13 @@ function DescriptiveTab({
             </ChartCard>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1.22fr)_minmax(0,0.78fr)] 2xl:grid-cols-[minmax(0,1.28fr)_minmax(0,0.72fr)]">
             <ChartCard
               title="Churn Rate Trend with Risk Band"
               subtitle="Bám theo chart churn band của file mẫu: xanh là ổn, vàng là cần chú ý, đỏ là vượt ngưỡng."
-              className="min-h-[300px]"
+              className="min-h-[340px]"
             >
-              <ResponsiveContainer width="100%" height={258}>
+              <ResponsiveContainer width="100%" height={292}>
                 <LineChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                   <ReferenceArea y1={CHURN_FLOOR_PCT} y2={CHURN_WARNING_PCT} fill="rgba(16,185,129,0.08)" />
@@ -446,10 +499,10 @@ function DescriptiveTab({
             <ChartCard
               title="New vs Churned Users"
               subtitle="Dùng chuỗi khách mới và khách rời bỏ Jan–Mar từ feature store để bám logic trend của notebook."
-              className="min-h-[300px]"
+              className="min-h-[340px]"
             >
               {hasNewVsChurnTrend ? (
-                <ResponsiveContainer width="100%" height={258}>
+                <ResponsiveContainer width="100%" height={292}>
                   <ComposedChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                     <XAxis dataKey="month_label" tick={{ fontSize: 12 }} tickFormatter={(value) => formatMonthLabel(String(value))} />
@@ -477,7 +530,7 @@ function DescriptiveTab({
         </>
       ) : null}
 
-      <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
         <ChartCard
           title="Churn Rate Donut"
           subtitle={
@@ -488,7 +541,7 @@ function DescriptiveTab({
           className="min-h-[300px]"
         >
           {churnDonutData.length ? (
-            <div className="relative h-[258px]">
+            <div className="relative h-[292px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie data={churnDonutData} dataKey="value" nameKey="name" innerRadius={64} outerRadius={92} paddingAngle={3}>
@@ -519,11 +572,11 @@ function DescriptiveTab({
         <ChartCard
           title="Value Tier × Risk Customer Segment"
           subtitle="Khôi phục heatmap snapshot theo đúng layout ở notebook/HTML khi nguồn hiện tại có đủ dữ liệu."
-          className="min-h-[300px]"
+          className="min-h-[340px]"
         >
           {riskHeatmapRows.length ? (
             <div className="grid gap-3">
-              <div className="grid grid-cols-[130px_repeat(3,minmax(0,1fr))] gap-2">
+              <div className="grid grid-cols-[144px_repeat(3,minmax(0,1fr))] gap-3">
                 <div />
                 {["At Risk", "Watchlist", "Stable"].map((segment) => (
                   <div key={segment} className="text-center text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
@@ -539,7 +592,7 @@ function DescriptiveTab({
                       return (
                         <div
                           key={`${tier}-${segment}`}
-                          className="flex min-h-[72px] items-center justify-center rounded-[18px] border border-slate-200 bg-blue-600/10 text-center"
+                          className="flex min-h-[88px] items-center justify-center rounded-[20px] border border-slate-200 bg-blue-600/10 px-3 text-center"
                           style={{ backgroundColor: `rgba(37,99,235,${cell?.opacity ?? 0.08})` }}
                         >
                           <div>
@@ -559,11 +612,11 @@ function DescriptiveTab({
         </ChartCard>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] 2xl:grid-cols-[minmax(0,0.68fr)_minmax(0,1.32fr)]">
         <ChartCard
           title="Nhóm khách cần theo dõi ngay"
           subtitle="Giữ mỗi nhóm một vài đại diện nổi bật để người xem bấm lọc và hiểu ngay phạm vi vấn đề."
-          className="min-h-[280px]"
+          className="min-h-[300px]"
         >
           <div className="space-y-4">
             {(Object.keys(segmentGroups) as Array<keyof typeof SEGMENT_LABELS>).map((segmentType) => {
@@ -620,29 +673,44 @@ function DescriptiveTab({
         </ChartCard>
 
         <ChartCard
-          title="Ma trận hành vi báo động sớm"
-          subtitle="Màu càng đỏ là nguy cơ rời bỏ càng cao; bong bóng càng lớn là quy mô khách càng lớn."
-          className="min-h-[320px]"
+          title="Top cụm hành vi đang đe dọa doanh thu"
+          subtitle="Chỉ giữ các cụm có doanh thu rủi ro cao nhất để tránh mỏi mắt. Trục ngang là mức khám phá, trục dọc là mức bỏ qua."
+          action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Top {behaviorFocusPoints.length || 0} cụm</span>}
+          className="min-h-[360px]"
         >
-          {data.boredom_scatter.length ? (
-            <ResponsiveContainer width="100%" height={278}>
+          {behaviorFocusPoints.length ? (
+            <ResponsiveContainer width="100%" height={324}>
               <ScatterChart margin={{ top: 16, right: 12, bottom: 12, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
-                <XAxis dataKey="discovery_ratio" name="Tỷ lệ khám phá" tick={{ fontSize: 12 }} domain={[0, 1]} />
-                <YAxis dataKey="skip_ratio" name="Tỷ lệ bỏ qua" tick={{ fontSize: 12 }} domain={[0, 1]} />
-                <ZAxis dataKey="users" range={[80, 900]} />
+                <XAxis
+                  dataKey="discovery_ratio"
+                  name="Tỷ lệ khám phá"
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={(value) => formatPct(Number(value) * 100, 0)}
+                  domain={[0, 1]}
+                />
+                <YAxis
+                  dataKey="skip_ratio"
+                  name="Tỷ lệ bỏ qua"
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={(value) => formatPct(Number(value) * 100, 0)}
+                  domain={[0, 1]}
+                />
+                <ZAxis dataKey="revenue_at_risk" range={[160, 980]} />
                 <Tooltip
                   formatter={(value: number, name) => {
                     if (name === "churn_rate_pct") return [formatPct(Number(value), 1), "Tỷ lệ rời bỏ"];
+                    if (name === "revenue_at_risk") return [formatCurrency(Number(value)), "Doanh thu bị đe dọa"];
                     if (name === "users") return [formatNumber(Number(value)), "Số khách"];
-                    if (name === "discovery_ratio") return [Number(value).toFixed(2), "Mức khám phá"];
-                    if (name === "skip_ratio") return [Number(value).toFixed(2), "Mức bỏ qua"];
+                    if (name === "discovery_ratio") return [formatPct(Number(value) * 100, 0), "Mức khám phá"];
+                    if (name === "skip_ratio") return [formatPct(Number(value) * 100, 0), "Mức bỏ qua"];
                     return Number(value).toFixed(2);
                   }}
+                  labelFormatter={(_, payload) => String(payload?.[0]?.payload?.cluster_label ?? "Cụm hành vi")}
                 />
-                <Scatter data={data.boredom_scatter}>
-                  {data.boredom_scatter.map((point, index) => (
-                    <Cell key={`scatter-${index}`} fill={bubbleColor(point.churn_rate_pct)} />
+                <Scatter data={behaviorFocusPoints}>
+                  {behaviorFocusPoints.map((point, index) => (
+                    <Cell key={`scatter-${index}`} fill={BEHAVIOR_CLUSTER_COLORS[index % BEHAVIOR_CLUSTER_COLORS.length]} />
                   ))}
                 </Scatter>
               </ScatterChart>
@@ -653,7 +721,7 @@ function DescriptiveTab({
         </ChartCard>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_360px]">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_320px] 2xl:grid-cols-[minmax(0,1.15fr)_360px]">
         <DescriptivePulsePanel onReplayFrameChange={onReplayFrameChange} snapshot={snapshot} />
 
         <div className="grid gap-4 self-start">
@@ -691,8 +759,8 @@ function DescriptiveTab({
             description={
               riskiestBehavior ? (
                 <>
-                  Ưu tiên nhóm có <strong>mức khám phá {riskiestBehavior.discovery_ratio.toFixed(2)}</strong> và{" "}
-                  <strong>mức bỏ qua {riskiestBehavior.skip_ratio.toFixed(2)}</strong> để thử chiến dịch kéo khách quay lại.
+                  Ưu tiên cụm <strong>{riskiestBehavior.cluster_label ?? "hành vi xấu nhất"}</strong> vì đang đe dọa khoảng{" "}
+                  <strong>{formatCurrency(Number(riskiestBehavior.revenue_at_risk ?? 0))}</strong> doanh thu.
                 </>
               ) : (
                 "Chưa có tín hiệu hành vi đủ mạnh để đề xuất hành động ưu tiên."

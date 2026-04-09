@@ -64,6 +64,8 @@ export type Tab1Kpis = {
   historical_churn_rate: number;
   overall_median_survival: number;
   auto_renew_rate: number;
+  total_expected_renewal_amount?: number;
+  historical_revenue_at_risk?: number;
 };
 
 export type Tab1MonthlyTrendPoint = {
@@ -74,6 +76,7 @@ export type Tab1MonthlyTrendPoint = {
   overall_median_survival: number;
   auto_renew_rate: number;
   total_expected_renewal_amount?: number | null;
+  historical_revenue_at_risk?: number | null;
   apru?: number | null;
   new_paid_users?: number | null;
   churned_users?: number | null;
@@ -118,6 +121,11 @@ export type BoredomPoint = {
   skip_ratio: number;
   users: number;
   churn_rate_pct: number;
+  revenue_at_risk?: number;
+  avg_expected_renewal_amount?: number;
+  cluster_label?: string;
+  discovery_bin?: string;
+  skip_bin?: string;
 };
 
 export type Tab1Payload = {
@@ -125,12 +133,14 @@ export type Tab1Payload = {
     month: string;
     dimension: string;
     trend_scope?: "overall" | "filtered";
+    previous_month?: string | null;
     segment_filter: {
       segment_type: SegmentType | null;
       segment_value: string | null;
     };
   };
   kpis: Tab1Kpis;
+  previous_kpis?: Tab1Kpis | null;
   monthly_trend?: Tab1MonthlyTrendPoint[];
   churn_breakdown?: Tab1ChurnBreakdown;
   risk_heatmap?: Tab1RiskHeatmapCell[];
@@ -184,6 +194,7 @@ export type PredictiveMatrixRow = {
   total_future_cltv: number;
   revenue_at_risk: number;
   primary_risk_driver: string;
+  recommended_action?: string;
   quadrant: string;
 };
 
@@ -208,6 +219,13 @@ export type ForecastDecayPoint = {
   timeline: string;
   segment: string;
   retention_pct: number;
+};
+
+export type RevenueLossOutlookPoint = {
+  horizon_months: number;
+  horizon_label: string;
+  projected_revenue_loss: number;
+  projected_loss_share_pct: number;
 };
 
 export type RiskBandMixRow = {
@@ -237,12 +255,15 @@ export type FeatureGroupWaterfallPoint = {
 export type SankeyNode = {
   name: string;
   color?: string | null;
+  stage?: string | null;
 };
 
 export type SankeyLink = {
   source: number;
   target: number;
   value: number;
+  color?: string | null;
+  risk_tier?: string | null;
 };
 
 export type SankeyPayload = {
@@ -283,6 +304,7 @@ export type PredictivePayload = {
   executive_value_risk_matrix?: PredictiveExecutiveMatrixBubble[];
   revenue_leakage: RevenueLeakageRow[];
   forecast_decay: ForecastDecayPoint[];
+  revenue_loss_outlook?: RevenueLossOutlookPoint[];
   prescriptions: PredictiveMatrixRow[];
   risk_band_mix: RiskBandMixRow[];
   feature_group_waterfall: FeatureGroupWaterfallPoint[];
@@ -349,6 +371,15 @@ export type MonteCarloMetric = {
   p95: number;
 };
 
+export type MonteCarloDistributionPoint = {
+  bucket_start: number;
+  bucket_end: number;
+  bucket_mid: number;
+  bucket_label: string;
+  run_count: number;
+  share_pct: number;
+};
+
 export type MonteCarloPayload = {
   enabled: boolean;
   artifact_dir: string | null;
@@ -361,6 +392,7 @@ export type MonteCarloPayload = {
   probability_net_positive: number | null;
   deterministic_summary: Record<string, number>;
   summary_metrics: MonteCarloMetric[];
+  net_value_distribution: MonteCarloDistributionPoint[];
 };
 
 export type PrescriptivePayload = {

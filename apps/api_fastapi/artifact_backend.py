@@ -62,6 +62,15 @@ TAB1_DIMENSION_FIELD_MAP = {
 TAB1_VISIBLE_VALUE_TIERS = ("Free Trial", "Deal Hunter", "Standard")
 TAB1_RISK_SEGMENT_ORDER = ("At Risk", "Watchlist", "Stable")
 TAB1_EXCLUDED_TREND_MONTHS = frozenset({201704})
+TAB1_BEHAVIOR_BIN_EDGES = [0.0, 0.2, 0.4, 0.6, 0.8, 1.000001]
+TAB1_BEHAVIOR_BIN_LABELS = ("0-20%", "20-40%", "40-60%", "60-80%", "80-100%")
+TAB1_BEHAVIOR_BIN_MIDPOINTS = {
+    "0-20%": 0.10,
+    "20-40%": 0.30,
+    "40-60%": 0.50,
+    "60-80%": 0.70,
+    "80-100%": 0.90,
+}
 
 TAB2_EXECUTIVE_RISK_ORDER = ("High", "Medium", "Low", "Unknown")
 TAB2_EXECUTIVE_RISK_LONG_LABELS = {
@@ -78,6 +87,14 @@ TAB2_FEATURE_GROUP_LABELS = {
     "loyalty_member": "Vòng đời thành viên",
     "other": "Tín hiệu khác",
     "base_risk": "Nền rủi ro",
+}
+TAB2_RECOMMENDED_ACTIONS = {
+    "Manual Renewal": "Ưu đãi chuyển sang auto-renew và nhắc thanh toán trước kỳ gia hạn.",
+    "High Skip Ratio": "Làm mới playlist và gợi ý nội dung hợp gu để kéo khách quay lại nghe.",
+    "Low Discovery": "Đẩy khám phá nội dung mới trên home feed và chiến dịch tái kích hoạt.",
+    "Price Sensitivity": "Đề xuất gói linh hoạt hoặc voucher giữ chân ngắn hạn.",
+    "Early Lifecycle": "Chuỗi onboarding 14 ngày và nhắc giá trị sớm sau đăng ký.",
+    "Mixed Behavioral Risk": "CSKH gọi lại kết hợp ưu đãi cá nhân hóa cho nhóm rủi ro hỗn hợp.",
 }
 
 TAB2_SCORE_COLUMNS = (
@@ -740,6 +757,127 @@ def _build_tab1_churn_breakdown(total_expiring_users: int, historical_churn_rate
     }
 
 
+def _tab1_normalized_churn_probability(frame: pd.DataFrame) -> pd.Series:
+    if "churn_rate" in frame.columns:
+        churn_probability = pd.to_numeric(frame["churn_rate"], errors="coerce").fillna(0.0)
+    elif "is_churn" in frame.columns:
+        churn_probability = pd.to_numeric(frame["is_churn"], errors="coerce").fillna(0.0)
+    else:
+        churn_probability = pd.Series(0.0, index=frame.index, dtype="float64")
+
+    churn_probability = churn_probability.where(churn_probability >= 0.0, 0.0).astype("float64")
+    high_mask = churn_probability > 1.0
+    churn_probability.loc[high_mask] = churn_probability.loc[high_mask] / 100.0
+    return churn_probability.clip(lower=0.0, upper=1.0)
+
+
+def _build_tab1_kpis_from_frame(frame: pd.DataFrame) -> dict[str, Any]:
+    if frame.empty:
+        return {
+            "total_expiring_users": 0,
+            "historical_churn_rate": 0.0,
+            "overall_median_survival": 0.0,
+            "auto_renew_rate": 0.0,
+            "total_expected_renewal_amount": 0.0,
+            "historical_revenue_at_risk": 0.0,
+        }
+
+    churn_probability = _tab1_normalized_churn_probability(frame)
+    expected_renewal_amount = (
+        pd.to_numeric(frame["expected_renewal_amount"], errors="coerce").fillna(0.0).clip(lower=0.0)
+        if "expected_renewal_amount" in frame.columns
+        else pd.Series(0.0, index=frame.index, dtype="float64")
+    )
+    if "expected_revenue_at_risk_30d" in frame.columns:
+        revenue_at_risk = pd.to_numeric(frame["expected_revenue_at_risk_30d"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    else:
+        revenue_at_risk = expected_renewal_amount * churn_probability
+
+    overall_median_survival = 0.0
+    if "survival_days_proxy" in frame.columns:
+        survival_days = pd.to_numeric(frame["survival_days_proxy"], errors="coerce").dropna()
+        if not survival_days.empty:
+            overall_median_survival = float(survival_days.median())
+
+    auto_renew_rate = 0.0
+    if "is_auto_renew" in frame.columns:
+        auto_renew_rate = float(pd.to_numeric(frame["is_auto_renew"], errors="coerce").fillna(0.0).mean() * 100.0)
+
+    return {
+        "total_expiring_users": int(frame["msno"].nunique()) if "msno" in frame.columns else int(len(frame)),
+        "historical_churn_rate": float(churn_probability.mean() * 100.0),
+        "overall_median_survival": overall_median_survival,
+        "auto_renew_rate": auto_renew_rate,
+        "total_expected_renewal_amount": float(expected_renewal_amount.sum()),
+        "historical_revenue_at_risk": float(revenue_at_risk.sum()),
+    }
+
+
+def _build_tab1_behavior_clusters(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    required_columns = {"msno", "discovery_ratio", "skip_ratio"}
+    if frame.empty or not required_columns.issubset(frame.columns):
+        return []
+
+    discovery_ratio = pd.to_numeric(frame["discovery_ratio"], errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+    skip_ratio = pd.to_numeric(frame["skip_ratio"], errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+    expected_renewal_amount = (
+        pd.to_numeric(frame["expected_renewal_amount"], errors="coerce").fillna(0.0).clip(lower=0.0)
+        if "expected_renewal_amount" in frame.columns
+        else pd.Series(0.0, index=frame.index, dtype="float64")
+    )
+    churn_probability = _tab1_normalized_churn_probability(frame)
+
+    clustered = pd.DataFrame(
+        {
+            "msno": frame["msno"].fillna("").astype(str),
+            "discovery_bin": pd.cut(
+                discovery_ratio,
+                bins=TAB1_BEHAVIOR_BIN_EDGES,
+                labels=TAB1_BEHAVIOR_BIN_LABELS,
+                include_lowest=True,
+                right=False,
+            ),
+            "skip_bin": pd.cut(
+                skip_ratio,
+                bins=TAB1_BEHAVIOR_BIN_EDGES,
+                labels=TAB1_BEHAVIOR_BIN_LABELS,
+                include_lowest=True,
+                right=False,
+            ),
+            "expected_renewal_amount": expected_renewal_amount,
+            "churn_probability": churn_probability,
+            "revenue_at_risk": expected_renewal_amount * churn_probability,
+        }
+    )
+    clustered = clustered.dropna(subset=["discovery_bin", "skip_bin"]).copy()
+    if clustered.empty:
+        return []
+    clustered["discovery_bin"] = clustered["discovery_bin"].astype(str)
+    clustered["skip_bin"] = clustered["skip_bin"].astype(str)
+
+    grouped = (
+        clustered.groupby(["discovery_bin", "skip_bin"], as_index=False)
+        .agg(
+            users=("msno", "nunique"),
+            avg_expected_renewal_amount=("expected_renewal_amount", "mean"),
+            churn_rate_pct=("churn_probability", "mean"),
+            revenue_at_risk=("revenue_at_risk", "sum"),
+        )
+        .sort_values(["revenue_at_risk", "users", "churn_rate_pct"], ascending=[False, False, False])
+        .reset_index(drop=True)
+    )
+    grouped["churn_rate_pct"] = grouped["churn_rate_pct"] * 100.0
+    grouped["discovery_ratio"] = grouped["discovery_bin"].map(TAB1_BEHAVIOR_BIN_MIDPOINTS).fillna(0.0)
+    grouped["skip_ratio"] = grouped["skip_bin"].map(TAB1_BEHAVIOR_BIN_MIDPOINTS).fillna(0.0)
+    grouped["cluster_label"] = grouped.apply(
+        lambda row: f"Kham pha {row['discovery_bin']} • Bo qua {row['skip_bin']}",
+        axis=1,
+    )
+
+    top_n = min(len(grouped), max(5, int(np.ceil(len(grouped) * 0.2))))
+    return grouped.head(top_n).to_dict(orient="records")
+
+
 def _build_tab1_monthly_trend_from_feature_store(
     monthly_kpis: pd.DataFrame,
     *,
@@ -793,15 +931,17 @@ def _build_tab1_monthly_trend_from_feature_store(
         total_expected_renewal_amount = float(getattr(row, "total_expected_renewal_amount", 0.0) or 0.0)
         new_paid_users = int(getattr(row, "new_paid_users", 0) or 0)
         churned_users = int(getattr(row, "churned_users", 0) or 0)
+        historical_churn_rate = float(getattr(row, "historical_churn_rate", 0.0) or 0.0)
         rows.append(
             {
                 "target_month": target_month,
                 "month_label": yyyymm_to_label(target_month),
                 "total_expiring_users": total_users,
-                "historical_churn_rate": float(getattr(row, "historical_churn_rate", 0.0) or 0.0),
+                "historical_churn_rate": historical_churn_rate,
                 "overall_median_survival": float(monthly_lookup.get(target_month, 0.0) or 0.0),
                 "auto_renew_rate": float(getattr(row, "auto_renew_rate", 0.0) or 0.0),
                 "total_expected_renewal_amount": total_expected_renewal_amount,
+                "historical_revenue_at_risk": float(total_expected_renewal_amount * historical_churn_rate / 100.0),
                 "apru": float(total_expected_renewal_amount / total_users) if total_users > 0 else None,
                 "new_paid_users": new_paid_users,
                 "churned_users": churned_users,
@@ -849,6 +989,14 @@ def _normalize_tab1_precomputed_monthly_trend(df: pd.DataFrame) -> list[dict[str
         _frame_series_or_default(work, "total_expected_renewal_amount", _frame_series_or_default(work, "revenue", np.nan)),
         errors="coerce",
     )
+    work["historical_revenue_at_risk"] = pd.to_numeric(
+        _frame_series_or_default(work, "historical_revenue_at_risk", np.nan),
+        errors="coerce",
+    )
+    risk_mask = work["historical_revenue_at_risk"].isna() & work["total_expected_renewal_amount"].notna()
+    work.loc[risk_mask, "historical_revenue_at_risk"] = (
+        work.loc[risk_mask, "total_expected_renewal_amount"] * work.loc[risk_mask, "historical_churn_rate"] / 100.0
+    )
     work["apru"] = pd.to_numeric(_frame_series_or_default(work, "apru", np.nan), errors="coerce")
     apru_mask = work["apru"].isna() & work["total_expected_renewal_amount"].notna() & (work["total_expiring_users"] > 0)
     work.loc[apru_mask, "apru"] = work.loc[apru_mask, "total_expected_renewal_amount"] / work.loc[apru_mask, "total_expiring_users"]
@@ -875,6 +1023,9 @@ def _normalize_tab1_precomputed_monthly_trend(df: pd.DataFrame) -> list[dict[str
                 "overall_median_survival": float(getattr(row, "overall_median_survival", 0.0) or 0.0),
                 "auto_renew_rate": float(getattr(row, "auto_renew_rate", 0.0) or 0.0),
                 "total_expected_renewal_amount": None if pd.isna(total_expected_renewal_amount) else float(total_expected_renewal_amount),
+                "historical_revenue_at_risk": None
+                if pd.isna(getattr(row, "historical_revenue_at_risk", np.nan))
+                else float(getattr(row, "historical_revenue_at_risk")),
                 "apru": None if pd.isna(getattr(row, "apru", np.nan)) else float(getattr(row, "apru")),
                 "new_paid_users": None if pd.isna(getattr(row, "new_paid_users", np.nan)) else int(round(float(getattr(row, "new_paid_users")))),
                 "churned_users": None if pd.isna(getattr(row, "churned_users", np.nan)) else int(round(float(getattr(row, "churned_users")))),
@@ -1004,6 +1155,11 @@ def _build_tab1_monthly_trend_from_kpis(
         total_users = int(getattr(row, "total_expiring_users", 0) or 0)
         revenue_value = pd.to_numeric(pd.Series([getattr(row, "total_expected_renewal_amount", np.nan)]), errors="coerce").iloc[0]
         total_expected_renewal_amount = None if pd.isna(revenue_value) else float(revenue_value)
+        historical_revenue_at_risk = (
+            float(total_expected_renewal_amount * churn_rate_pct / 100.0)
+            if total_expected_renewal_amount is not None
+            else None
+        )
         apru = (
             float(total_expected_renewal_amount / total_users)
             if total_expected_renewal_amount is not None and total_users > 0
@@ -1018,6 +1174,7 @@ def _build_tab1_monthly_trend_from_kpis(
                 "overall_median_survival": float(getattr(row, "median_survival_days_proxy", 0.0) or 0.0),
                 "auto_renew_rate": auto_renew_rate,
                 "total_expected_renewal_amount": total_expected_renewal_amount,
+                "historical_revenue_at_risk": historical_revenue_at_risk,
                 "apru": apru,
                 "new_paid_users": None,
                 "churned_users": int(round(total_users * churn_rate_pct / 100.0)),
@@ -1198,6 +1355,7 @@ def _empty_tab1_payload(
             "dimension": _tab1_dimension_column(dimension),
             "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
             "trend_scope": "filtered" if segment_type and segment_value else "overall",
+            "previous_month": None,
             "artifact_mode": "artifact_backed",
             "artifact_dir": str(artifact_dir),
         },
@@ -1206,7 +1364,10 @@ def _empty_tab1_payload(
             "historical_churn_rate": 0.0,
             "overall_median_survival": 0.0,
             "auto_renew_rate": 0.0,
+            "total_expected_renewal_amount": 0.0,
+            "historical_revenue_at_risk": 0.0,
         },
+        "previous_kpis": None,
         "monthly_trend": [],
         "churn_breakdown": {
             "renewed_users": 0,
@@ -1246,6 +1407,9 @@ def build_tab1_descriptive_payload(
     filtered = _filter_by_segment(snapshot_df, segment_type, segment_value)
     dimension_col = _tab1_dimension_column(dimension)
     monthly_kpis = _load_tab1_monthly_kpis(tab1_dir)
+    previous_month = previous_yyyymm(target_month)
+    previous_kpis: dict[str, Any] | None = None
+    previous_month_label: str | None = None
     monthly_row = monthly_kpis[monthly_kpis["target_month"] == target_month]
     precomputed_trend = (
         _normalize_tab1_precomputed_monthly_trend(_load_tab1_trend_monthly_summary_df(tab1_dir))
@@ -1274,7 +1438,40 @@ def build_tab1_descriptive_payload(
         raise ValueError(f"Khong tim thay cot dimension trong artifact Tab 1: {dimension_col}")
 
     work = filtered.copy()
-    churn_rate_clean = work["churn_rate"].where(work["churn_rate"] >= 0) if "churn_rate" in work.columns else pd.Series(dtype="float64")
+    current_kpis = _build_tab1_kpis_from_frame(work)
+    previous_columns = {
+        "msno",
+        "churn_rate",
+        "is_churn",
+        "survival_days_proxy",
+        "is_auto_renew",
+        "expected_renewal_amount",
+        "expected_revenue_at_risk_30d",
+    }
+    if segment_type in ALLOWED_SEGMENT_TYPES:
+        previous_columns.add(segment_type)
+    try:
+        previous_snapshot = _load_tab1_snapshot_df(tab1_dir, previous_month, columns=tuple(sorted(previous_columns)))
+    except FileNotFoundError:
+        previous_snapshot = pd.DataFrame()
+    if not previous_snapshot.empty:
+        previous_filtered = _filter_by_segment(previous_snapshot, segment_type, segment_value)
+        if not previous_filtered.empty:
+            previous_kpis = _build_tab1_kpis_from_frame(previous_filtered)
+            previous_month_label = yyyymm_to_label(previous_month)
+    if previous_kpis is None:
+        prior_points = [point for point in monthly_trend if int(point.get("target_month", 0) or 0) < target_month]
+        if prior_points:
+            previous_point = prior_points[-1]
+            previous_kpis = {
+                "total_expiring_users": int(previous_point.get("total_expiring_users", 0) or 0),
+                "historical_churn_rate": float(previous_point.get("historical_churn_rate", 0.0) or 0.0),
+                "overall_median_survival": float(previous_point.get("overall_median_survival", 0.0) or 0.0),
+                "auto_renew_rate": float(previous_point.get("auto_renew_rate", 0.0) or 0.0),
+                "total_expected_renewal_amount": float(previous_point.get("total_expected_renewal_amount", 0.0) or 0.0),
+                "historical_revenue_at_risk": float(previous_point.get("historical_revenue_at_risk", 0.0) or 0.0),
+            }
+            previous_month_label = str(previous_point.get("month_label") or yyyymm_to_label(int(previous_point["target_month"])))
 
     segment_frames: list[pd.DataFrame] = []
     for current_segment in sorted(ALLOWED_SEGMENT_TYPES):
@@ -1300,20 +1497,7 @@ def build_tab1_descriptive_payload(
         if segment_frames
         else []
     )
-
-    boredom_df = (
-        work.assign(
-            discovery_ratio=work["discovery_ratio"].fillna(0.0).round(2),
-            skip_ratio=work["skip_ratio"].fillna(0.0).round(2),
-        )
-        .groupby(["discovery_ratio", "skip_ratio"], as_index=False)
-        .agg(
-            users=("msno", "nunique"),
-            churn_rate_pct=("churn_rate", lambda s: float(s[s >= 0].mean() * 100.0) if (s >= 0).any() else 0.0),
-        )
-        .sort_values("users", ascending=False)
-        .head(800)
-    )
+    behavior_clusters = _build_tab1_behavior_clusters(work)
 
     if segment_type or segment_value:
         km_curve: list[dict[str, Any]] = []
@@ -1337,26 +1521,10 @@ def build_tab1_descriptive_payload(
                     }
                 )
             km_curve.append({"dimension_value": str(dimension_value), "points": points})
-
-    if not monthly_row.empty and not segment_type and not segment_value:
-        kpi_row = monthly_row.iloc[0]
-        total_expiring_users = int(kpi_row.get("total_expiring_users", 0))
-        historical_churn_rate = float(kpi_row.get("historical_churn_rate", 0.0))
-        auto_renew_rate = float(kpi_row.get("auto_renew_rate", 0.0))
-        overall_median_survival = float(kpi_row.get("median_survival_days_proxy", 0.0))
-        if historical_churn_rate <= 1.0:
-            historical_churn_rate *= 100.0
-        if auto_renew_rate <= 1.0:
-            auto_renew_rate *= 100.0
-        if historical_churn_rate >= 99.0 and churn_rate_clean.notna().any():
-            historical_churn_rate = float(churn_rate_clean.mean() * 100.0)
-    else:
-        total_expiring_users = int(work["msno"].nunique())
-        historical_churn_rate = float(churn_rate_clean.mean() * 100.0) if not churn_rate_clean.empty and churn_rate_clean.notna().any() else 0.0
-        overall_median_survival = float(work["survival_days_proxy"].dropna().median()) if work["survival_days_proxy"].notna().any() else 0.0
-        auto_renew_rate = float(work["is_auto_renew"].mean() * 100.0)
-
-    churn_breakdown = _build_tab1_churn_breakdown(total_expiring_users, historical_churn_rate)
+    churn_breakdown = _build_tab1_churn_breakdown(
+        int(current_kpis["total_expiring_users"]),
+        float(current_kpis["historical_churn_rate"]),
+    )
     precomputed_risk_heatmap = (
         _normalize_tab1_precomputed_risk_heatmap(_load_tab1_snapshot_risk_heatmap_df(tab1_dir), target_month)
         if not segment_type and not segment_value
@@ -1370,21 +1538,18 @@ def build_tab1_descriptive_payload(
             "dimension": dimension_col,
             "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
             "trend_scope": trend_scope,
+            "previous_month": previous_month_label,
             "artifact_mode": "artifact_backed",
             "artifact_dir": str(tab1_dir),
         },
-        "kpis": {
-            "total_expiring_users": total_expiring_users,
-            "historical_churn_rate": historical_churn_rate,
-            "overall_median_survival": overall_median_survival,
-            "auto_renew_rate": auto_renew_rate,
-        },
+        "kpis": current_kpis,
+        "previous_kpis": previous_kpis,
         "monthly_trend": monthly_trend,
         "churn_breakdown": churn_breakdown,
         "risk_heatmap": risk_heatmap,
         "km_curve": km_curve,
         "segment_mix": segment_mix,
-        "boredom_scatter": boredom_df.to_dict(orient="records"),
+        "boredom_scatter": behavior_clusters,
     }
 
 
@@ -1660,6 +1825,10 @@ def _derive_primary_risk_driver(df: pd.DataFrame) -> pd.Series:
     return pd.Series(drivers, index=df.index, dtype="object")
 
 
+def _recommended_action_for_driver(driver: str) -> str:
+    return TAB2_RECOMMENDED_ACTIONS.get(driver, TAB2_RECOMMENDED_ACTIONS["Mixed Behavioral Risk"])
+
+
 def _build_predictive_matrix(df: pd.DataFrame) -> list[dict[str, Any]]:
     if df.empty:
         return []
@@ -1697,6 +1866,7 @@ def _build_predictive_matrix(df: pd.DataFrame) -> list[dict[str, Any]]:
         default="Monitor",
     )
     grouped = grouped.rename(columns={"driver_mode": "primary_risk_driver"})
+    grouped["recommended_action"] = grouped["primary_risk_driver"].map(_recommended_action_for_driver)
     return grouped.to_dict(orient="records")
 
 
@@ -1760,6 +1930,7 @@ def _build_predictive_matrix_from_segment_summary(summary_df: pd.DataFrame) -> l
         ["Must Save", "At Risk", "Core Value"],
         default="Monitor",
     )
+    work["recommended_action"] = work["primary_risk_driver"].map(_recommended_action_for_driver)
 
     ordered = work.sort_values(["revenue_at_risk", "avg_churn_prob"], ascending=[False, False]).reset_index(drop=True)
     columns = [
@@ -1771,6 +1942,7 @@ def _build_predictive_matrix_from_segment_summary(summary_df: pd.DataFrame) -> l
         "total_future_cltv",
         "revenue_at_risk",
         "primary_risk_driver",
+        "recommended_action",
         "quadrant",
     ]
     return ordered[columns].to_dict(orient="records")
@@ -2025,13 +2197,20 @@ def _build_revenue_flow_sankey(df: pd.DataFrame) -> dict[str, Any]:
         TAB2_EXECUTIVE_RISK_LONG_LABELS["Medium"]: "#f59e0b",
         TAB2_EXECUTIVE_RISK_LONG_LABELS["High"]: "#ef4444",
     }
+    link_colors = {
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["High"]: "rgba(239, 68, 68, 0.36)",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Medium"]: "rgba(245, 158, 11, 0.34)",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Low"]: "rgba(16, 185, 129, 0.34)",
+        TAB2_EXECUTIVE_RISK_LONG_LABELS["Unknown"]: "rgba(148, 163, 184, 0.28)",
+    }
     node_index = {name: idx for idx, name in enumerate(node_names)}
 
     def grouped_links(source_col: str, target_col: str) -> list[dict[str, Any]]:
+        group_cols = list(dict.fromkeys([source_col, target_col, "risk_bucket"]))
         grouped = (
-            work.groupby([source_col, target_col], as_index=False)
+            work.groupby(group_cols, as_index=False)
             .agg(value=("expected_revenue_at_risk_30d", "sum"))
-            .sort_values("value", ascending=False)
+            .sort_values(["value", "risk_bucket"], ascending=[False, True])
             .reset_index(drop=True)
         )
         return [
@@ -2039,6 +2218,8 @@ def _build_revenue_flow_sankey(df: pd.DataFrame) -> dict[str, Any]:
                 "source": node_index[str(row[source_col])],
                 "target": node_index[str(row[target_col])],
                 "value": float(row["value"]),
+                "color": link_colors.get(str(row["risk_bucket"]), link_colors[TAB2_EXECUTIVE_RISK_LONG_LABELS["Unknown"]]),
+                "risk_tier": str(row["risk_bucket"]),
             }
             for _, row in grouped.iterrows()
             if float(row["value"]) > 0
@@ -2147,6 +2328,31 @@ def _build_forecast_decay(df: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
+def _build_revenue_loss_outlook(df: pd.DataFrame) -> list[dict[str, Any]]:
+    if df.empty:
+        return []
+
+    expected_renewal_amount = pd.to_numeric(df["expected_renewal_amount"], errors="coerce").fillna(0.0).clip(lower=0.0)
+    churn_probability = pd.to_numeric(df["churn_probability"], errors="coerce").fillna(0.0).clip(lower=0.0, upper=1.0)
+    if expected_renewal_amount.sum() <= 0:
+        return []
+
+    rows: list[dict[str, Any]] = []
+    total_expected = float(expected_renewal_amount.sum())
+    for horizon in (3, 6, 12):
+        cumulative_loss_rate = 1.0 - np.power(1.0 - churn_probability, horizon)
+        projected_revenue_loss = float((expected_renewal_amount * cumulative_loss_rate).sum())
+        rows.append(
+            {
+                "horizon_months": horizon,
+                "horizon_label": f"{horizon} tháng",
+                "projected_revenue_loss": projected_revenue_loss,
+                "projected_loss_share_pct": float(projected_revenue_loss / total_expected * 100.0) if total_expected > 0 else 0.0,
+            }
+        )
+    return rows
+
+
 def _zero_predictive_kpis() -> dict[str, Any]:
     return {
         "forecasted_churn_rate": 0.0,
@@ -2250,6 +2456,7 @@ def build_tab2_predictive_payload(
         "executive_value_risk_matrix": executive_matrix_rows,
         "revenue_leakage": _build_revenue_leakage(filtered_scored),
         "forecast_decay": _build_forecast_decay(filtered_scored),
+        "revenue_loss_outlook": _build_revenue_loss_outlook(filtered_scored),
         "prescriptions": matrix_rows[:200],
         "risk_band_mix": _build_risk_band_mix(filtered_scored),
         "feature_group_waterfall": _build_feature_group_waterfall(
@@ -2700,7 +2907,60 @@ def _default_monte_carlo_payload() -> dict[str, Any]:
         "probability_net_positive": None,
         "deterministic_summary": {},
         "summary_metrics": [],
+        "net_value_distribution": [],
     }
+
+
+def _build_monte_carlo_net_value_distribution(mc_dir: Path, target_month: int) -> list[dict[str, Any]]:
+    path = mc_dir / f"tab3_monte_carlo_runs_{target_month}.parquet"
+    if not path.exists():
+        return []
+
+    try:
+        runs_df = pd.read_parquet(path, columns=["net_value_after_cost_30d"])
+    except Exception:
+        return []
+
+    values = pd.to_numeric(runs_df.get("net_value_after_cost_30d"), errors="coerce").dropna()
+    if values.empty:
+        return []
+
+    numeric = values.to_numpy(dtype=float)
+    lower = float(np.min(numeric))
+    upper = float(np.max(numeric))
+
+    if np.isclose(lower, upper):
+        total = int(numeric.size)
+        return [
+            {
+                "bucket_start": lower,
+                "bucket_end": upper,
+                "bucket_mid": lower,
+                "bucket_label": f"{lower:,.0f}",
+                "run_count": total,
+                "share_pct": 100.0,
+            }
+        ]
+
+    bin_count = int(np.clip(np.sqrt(numeric.size), 10, 20))
+    counts, edges = np.histogram(numeric, bins=bin_count)
+    total = max(int(counts.sum()), 1)
+
+    rows: list[dict[str, Any]] = []
+    for index, count in enumerate(counts):
+        bucket_start = float(edges[index])
+        bucket_end = float(edges[index + 1])
+        rows.append(
+            {
+                "bucket_start": bucket_start,
+                "bucket_end": bucket_end,
+                "bucket_mid": float((bucket_start + bucket_end) / 2.0),
+                "bucket_label": f"{bucket_start:,.0f} -> {bucket_end:,.0f}",
+                "run_count": int(count),
+                "share_pct": float(count / total * 100.0),
+            }
+        )
+    return rows
 
 
 def _build_monte_carlo_payload(mc_dir: Path, target_month: int) -> dict[str, Any]:
@@ -2764,6 +3024,7 @@ def _build_monte_carlo_payload(mc_dir: Path, target_month: int) -> dict[str, Any
         "probability_net_positive": float(summary.get("probability_net_positive", 0.0)),
         "deterministic_summary": deterministic,
         "summary_metrics": summary_metrics,
+        "net_value_distribution": _build_monte_carlo_net_value_distribution(mc_dir, target_month),
     }
 
 

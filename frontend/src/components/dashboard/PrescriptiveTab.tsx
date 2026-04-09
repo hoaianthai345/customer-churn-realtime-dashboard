@@ -1,4 +1,5 @@
-import { GaugeCircle, Orbit, SlidersHorizontal } from "lucide-react";
+import { useMemo } from "react";
+import { GaugeCircle, SlidersHorizontal } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -7,6 +8,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -23,6 +25,7 @@ import {
   formatCurrency,
   formatNumber,
   formatPct,
+  type MonteCarloMetric,
   type PrescriptivePayload,
   type ScenarioInputs,
 } from "@/lib/dashboard";
@@ -53,7 +56,44 @@ export default function PrescriptiveTab({
   const initialLoading = loading && !data;
   const switchingPreset = loading && !!data;
   const hazardData = buildHazardChartData(data?.hazard_histogram ?? []);
-  const confidenceMetrics = (data?.monte_carlo?.summary_metrics ?? []).slice(0, 3);
+  const monteCarloDistribution = data?.monte_carlo?.net_value_distribution ?? [];
+  const monteCarloProbabilityData = useMemo(
+    () =>
+      [
+        {
+          label: "Thắng mức gốc",
+          value: data?.monte_carlo?.probability_scenario_beats_baseline,
+          fill: "#0f766e",
+          note: "Xác suất phương án vượt mức hiện tại",
+        },
+        {
+          label: "Vẫn có lãi",
+          value: data?.monte_carlo?.probability_net_positive,
+          fill: "#2563eb",
+          note: "Xác suất giá trị ròng sau chi phí vẫn dương",
+        },
+      ]
+        .filter((row) => row.value != null)
+        .map((row) => ({
+          ...row,
+          value_pct: Number(row.value) * 100,
+        })),
+    [data?.monte_carlo?.probability_net_positive, data?.monte_carlo?.probability_scenario_beats_baseline],
+  );
+  const monteCarloConfidenceMetrics = useMemo(() => {
+    const metrics = data?.monte_carlo?.summary_metrics ?? [];
+    const priorityColumns = [
+      "net_value_after_cost_30d",
+      "saved_revenue_from_risk_reduction_30d",
+      "incremental_upsell_revenue_30d",
+      "scenario_churn_prob_pct",
+    ];
+    const selected = priorityColumns
+      .map((column) => metrics.find((metric) => metric.column === column))
+      .filter((metric): metric is MonteCarloMetric => Boolean(metric));
+
+    return selected.length ? selected : metrics.slice(0, 4);
+  }, [data?.monte_carlo?.summary_metrics]);
   const availableScenarios = data?.meta.available_scenarios ?? [];
   const currentScenario =
     availableScenarios.find((scenario) => scenario.scenario_id === (selectedScenarioId ?? data?.meta.scenario_id)) ??
@@ -97,14 +137,14 @@ export default function PrescriptiveTab({
 
   return (
     <div className="space-y-5" aria-busy={switchingPreset}>
-      <div className={`grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_360px] ${contentTransitionClass}`}>
+      <div className={`grid gap-5 xl:grid-cols-[minmax(0,1.62fr)_320px] 2xl:grid-cols-[minmax(0,1.5fr)_360px] ${contentTransitionClass}`}>
         <ChartCard
           title="Phương án này có đáng triển khai không?"
           subtitle="Giữ một waterfall tài chính làm tâm điểm để nhìn ngay lợi ích giữ lại, bán thêm và chi phí cuối cùng cộng lại thành gì."
-          className="min-h-[280px]"
+          className="min-h-[320px]"
         >
           {data.financial_waterfall.length ? (
-            <ResponsiveContainer width="100%" height={250}>
+            <ResponsiveContainer width="100%" height={284}>
               <BarChart data={data.financial_waterfall}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} angle={-12} textAnchor="end" height={72} />
@@ -262,6 +302,146 @@ export default function PrescriptiveTab({
         </ChartCard>
       </div>
 
+      <div className={`grid gap-5 xl:grid-cols-[420px_minmax(0,1fr)] ${contentTransitionClass}`}>
+        <ChartCard
+          title="Xác suất Monte Carlo"
+          subtitle={`Tổng hợp từ ${formatNumber(data.monte_carlo.n_iterations)} lần mô phỏng để đọc nhanh khả năng thắng và khả năng vẫn có lãi.`}
+          className="min-h-[320px]"
+        >
+          {data.monte_carlo.enabled && monteCarloProbabilityData.length ? (
+            <div className="space-y-4">
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={monteCarloProbabilityData} layout="vertical" margin={{ top: 8, right: 16, bottom: 8, left: 8 }}>
+                  <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
+                  <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value)}%`} />
+                  <YAxis type="category" dataKey="label" width={112} tick={{ fontSize: 12 }} />
+                  <ReferenceLine x={50} stroke="rgba(148,163,184,0.9)" strokeDasharray="6 6" />
+                  <Tooltip formatter={(value: number) => [formatPct(Number(value), 1), "Xác suất"]} />
+                  <Bar dataKey="value_pct" radius={[0, 10, 10, 0]}>
+                    {monteCarloProbabilityData.map((row) => (
+                      <Cell key={row.label} fill={row.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+
+              <div className="grid gap-3">
+                {monteCarloProbabilityData.map((row) => (
+                  <div key={row.label} className="rounded-[18px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-medium text-slate-950">{row.label}</span>
+                      <span className="rounded-full px-3 py-1 text-xs font-semibold text-white" style={{ backgroundColor: row.fill }}>
+                        {formatPct(row.value_pct, 1)}
+                      </span>
+                    </div>
+                    <p className="mt-2 leading-6">{row.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <StatePanel title="Chưa có xác suất Monte Carlo" description="Kịch bản này chưa có đầu ra mô phỏng để đọc xác suất outcome." />
+          )}
+        </ChartCard>
+
+        <ChartCard
+          title="Phân bố giá trị ròng qua các lần mô phỏng"
+          subtitle="Histogram của Net Value After Cost cho thấy phương án đang dao động quanh vùng lời hay lỗ mạnh đến mức nào."
+          className="min-h-[320px]"
+        >
+          {data.monte_carlo.enabled && monteCarloDistribution.length ? (
+            <ResponsiveContainer width="100%" height={272}>
+              <BarChart data={monteCarloDistribution} margin={{ top: 12, right: 12, bottom: 74, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
+                <XAxis dataKey="bucket_label" interval={0} angle={-22} textAnchor="end" height={78} tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => formatNumber(Number(value))} />
+                <Tooltip
+                  labelFormatter={(_, payload) => {
+                    const row = payload?.[0]?.payload;
+                    if (!row) return "";
+                    return `${formatCurrency(Number(row.bucket_start))} đến ${formatCurrency(Number(row.bucket_end))}`;
+                  }}
+                  formatter={(value: number, name, item) => {
+                    if (name === "run_count") {
+                      const row = item?.payload;
+                      return [`${formatNumber(Number(value))} lần chạy • ${formatPct(Number(row?.share_pct ?? 0), 1)}`, "Số lần mô phỏng"];
+                    }
+                    return [value, name];
+                  }}
+                />
+                <Bar dataKey="run_count" radius={[8, 8, 0, 0]}>
+                  {monteCarloDistribution.map((row, index) => (
+                    <Cell
+                      key={`${row.bucket_start}-${row.bucket_end}-${index}`}
+                      fill={
+                        row.bucket_end <= 0
+                          ? "#ef4444"
+                          : row.bucket_start >= 0
+                            ? "#0f766e"
+                            : "#f59e0b"
+                      }
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <StatePanel title="Chưa có phân bố mô phỏng" description="Nguồn hiện tại chưa trả về histogram của giá trị ròng Monte Carlo." />
+          )}
+        </ChartCard>
+      </div>
+
+      <div className={`grid gap-5 xl:grid-cols-[minmax(0,1.18fr)_minmax(0,0.82fr)] ${contentTransitionClass}`}>
+        <ChartCard
+          title="Dải bất định P05-P95"
+          subtitle="Dùng dải xác suất để thấy phương án dao động rộng hay hẹp trên từng chỉ số trọng yếu."
+          className="min-h-[330px]"
+        >
+          {data.monte_carlo.enabled && monteCarloConfidenceMetrics.length ? (
+            <div className="space-y-4">
+              {monteCarloConfidenceMetrics.map((metric) => (
+                <MonteCarloBandRow
+                  key={metric.column ?? metric.metric}
+                  metric={metric}
+                  deterministicValue={resolveDeterministicMetricValue(metric, data)}
+                />
+              ))}
+            </div>
+          ) : (
+            <StatePanel title="Chưa có dải bất định" description="Kịch bản này chưa có percentile Monte Carlo cho các chỉ số chính." />
+          )}
+        </ChartCard>
+
+        <div className="grid gap-4 self-start">
+          <InsightCard
+            type="insight"
+            title="Monte Carlo đang nói gì?"
+            description={
+              data.monte_carlo.enabled ? (
+                <>
+                  Kịch bản này đã được chạy <strong>{formatNumber(data.monte_carlo.n_iterations)}</strong> lần mô phỏng để kiểm tra độ ổn định, không chỉ nhìn một giá trị trung bình.
+                </>
+              ) : (
+                "Kịch bản hiện tại chưa có đầu ra Monte Carlo để kiểm tra độ chắc chắn."
+              )
+            }
+          />
+          <InsightCard
+            type="warning"
+            title="Điểm cần canh"
+            description={
+              data.monte_carlo.enabled ? (
+                <>
+                  Nếu histogram còn cắt qua vùng âm hoặc dải P05-P95 quá rộng, đội nên coi đây là phương án có độ biến động cao dù giá trị kỳ vọng vẫn dương.
+                </>
+              ) : (
+                "Khi chưa có mô phỏng, nên coi ước tính hiện tại là một điểm tham chiếu chứ chưa phải vùng chắc chắn."
+              )
+            }
+          />
+        </div>
+      </div>
+
       <div className={`grid gap-4 xl:grid-cols-3 ${contentTransitionClass}`}>
         <InsightCard
           type="success"
@@ -309,10 +489,10 @@ export default function PrescriptiveTab({
       <details className={`rounded-[28px] border border-white/70 bg-white/88 p-5 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.34)] backdrop-blur ${contentTransitionClass}`}>
         <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">Xem lớp phân tích bổ sung</summary>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Giữ phần này ở lớp phụ để màn chính vẫn giống một slide chốt phương án, nhưng vẫn có đủ dữ liệu để trao đổi sâu khi cần.
+          Giữ phần này cho các biểu đồ giải thích phụ, còn Monte Carlo đã được đẩy lên vùng chính để đọc quyết định ngay trên màn đầu.
         </p>
 
-        <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="mt-5">
           <ChartCard
             title="Dịch chuyển mức rủi ro toàn bộ khách"
             subtitle="So sánh trước và sau can thiệp để xem rủi ro có thật sự dồn về vùng an toàn hơn không."
@@ -333,32 +513,6 @@ export default function PrescriptiveTab({
             ) : (
               <StatePanel title="Chưa có biểu đồ dịch chuyển rủi ro" description="Kịch bản này chưa có đủ dữ liệu để so sánh phân bố rủi ro trước và sau can thiệp." />
             )}
-          </ChartCard>
-
-          <ChartCard
-            title="Độ chắc chắn của phương án"
-            subtitle="Dùng khi cần phòng vệ trước câu hỏi về độ ổn định của kịch bản."
-            className="min-h-[300px]"
-          >
-            <div className="space-y-4">
-              {confidenceMetrics.map((metric) => {
-                const metricLabel = formatConfidenceMetric(metric.metric);
-                const isPct = metric.metric.toLowerCase().includes("churn") || metric.metric.includes("%");
-                return (
-                  <div key={metric.metric} className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-slate-950">{metricLabel}</p>
-                      <Orbit className="h-4 w-4 text-slate-400" />
-                    </div>
-                    <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                      <MetricBox label="P05" value={isPct ? formatPct(metric.p05) : formatCurrency(metric.p05)} />
-                      <MetricBox label="P50" value={isPct ? formatPct(metric.p50) : formatCurrency(metric.p50)} />
-                      <MetricBox label="P95" value={isPct ? formatPct(metric.p95) : formatCurrency(metric.p95)} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </ChartCard>
         </div>
       </details>
@@ -411,21 +565,17 @@ function DecisionBox({ label, value, tone }: { label: string; value: string; ton
   );
 }
 
-function MetricBox({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl bg-white px-4 py-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
-      <p className="mt-2 text-sm font-medium text-slate-950">{value}</p>
-    </div>
-  );
-}
-
 function formatConfidenceMetric(metric: string): string {
   const metricMap: Record<string, string> = {
     "Scenario churn %": "Tỷ lệ rời bỏ theo phương án",
     "Baseline churn %": "Tỷ lệ rời bỏ hiện tại",
     "Net value after cost": "Giá trị ròng sau chi phí",
-    "Saved revenue": "Doanh thu giữ lại thêm",
+    "Saved Revenue": "Doanh thu giữ lại thêm",
+    "Saved Revenue from Risk Reduction": "Doanh thu giữ lại thêm",
+    "Incremental Upsell Revenue": "Doanh thu bán thêm",
+    "Scenario Revenue": "Doanh thu theo phương án",
+    "Baseline Revenue": "Doanh thu mức gốc",
+    "Campaign Cost": "Chi phí triển khai",
   };
 
   return metricMap[metric] ?? metric;
@@ -433,4 +583,88 @@ function formatConfidenceMetric(metric: string): string {
 
 function formatCompact(value: number): string {
   return new Intl.NumberFormat("vi-VN", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value) || 0);
+}
+
+function resolveDeterministicMetricValue(metric: MonteCarloMetric, data: PrescriptivePayload): number | null {
+  switch (metric.column) {
+    case "net_value_after_cost_30d":
+      return Number(data.kpis.net_value_after_cost ?? 0);
+    case "saved_revenue_from_risk_reduction_30d":
+      return Number(data.kpis.saved_revenue ?? 0);
+    case "incremental_upsell_revenue_30d":
+      return Number(data.kpis.incremental_upsell ?? 0);
+    case "scenario_retained_revenue_30d":
+      return Number(data.kpis.optimized_projected_revenue ?? 0);
+    case "baseline_retained_revenue_30d":
+      return Number(data.kpis.baseline_revenue ?? 0);
+    case "campaign_cost_30d":
+      return Number(data.kpis.campaign_cost ?? 0);
+    case "scenario_churn_prob_pct":
+      return Number(data.kpis.scenario_churn_prob_pct ?? 0);
+    case "baseline_churn_prob_pct":
+      return Number(data.kpis.baseline_churn_prob_pct ?? 0);
+    default:
+      return null;
+  }
+}
+
+function formatMonteCarloMetricValue(metric: MonteCarloMetric, value: number): string {
+  const isPct = Boolean(metric.column?.includes("churn_prob_pct")) || metric.metric.toLowerCase().includes("churn");
+  return isPct ? formatPct(value, 2) : formatCurrency(value);
+}
+
+function MonteCarloBandRow({
+  metric,
+  deterministicValue,
+}: {
+  metric: MonteCarloMetric;
+  deterministicValue: number | null;
+}) {
+  const bandSpan = Math.max(metric.p95 - metric.p05, Math.abs(metric.p50) * 0.05, 1e-6);
+  const normalize = (value: number) => Math.min(100, Math.max(0, ((value - metric.p05) / bandSpan) * 100));
+  const middleStart = normalize(metric.p25);
+  const middleEnd = normalize(metric.p75);
+  const medianPosition = normalize(metric.p50);
+  const deterministicPosition = deterministicValue == null ? null : normalize(deterministicValue);
+  const toneClass = metric.column?.includes("churn_prob_pct") ? "bg-blue-600" : "bg-emerald-600";
+
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-medium text-slate-950">{formatConfidenceMetric(metric.metric)}</p>
+          <p className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+            P50 {formatMonteCarloMetricValue(metric, metric.p50)} • Mean {formatMonteCarloMetricValue(metric, metric.mean)}
+          </p>
+        </div>
+        {deterministicValue != null ? (
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+            Deterministic {formatMonteCarloMetricValue(metric, deterministicValue)}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="mt-4">
+        <div className="relative h-4 rounded-full bg-slate-200/90">
+          <div className="absolute inset-y-0 left-0 rounded-full bg-slate-300" style={{ width: "100%" }} />
+          <div
+            className="absolute inset-y-0 rounded-full bg-slate-500/55"
+            style={{ left: `${middleStart}%`, width: `${Math.max(middleEnd - middleStart, 2)}%` }}
+          />
+          <div className="absolute top-1/2 h-7 w-[2px] -translate-y-1/2 bg-slate-950" style={{ left: `${medianPosition}%` }} />
+          {deterministicPosition != null ? (
+            <div
+              className={`absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white shadow ${toneClass}`}
+              style={{ left: `${deterministicPosition}%` }}
+            />
+          ) : null}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-600">
+          <span>P05 {formatMonteCarloMetricValue(metric, metric.p05)}</span>
+          <span>P95 {formatMonteCarloMetricValue(metric, metric.p95)}</span>
+        </div>
+      </div>
+    </div>
+  );
 }

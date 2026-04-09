@@ -42,6 +42,13 @@ type MetricCardConfig = {
   footer?: string;
 };
 
+function relativeChange(current: number | null | undefined, previous: number | null | undefined): number | undefined {
+  if (current == null || previous == null) return undefined;
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return undefined;
+  if (Math.abs(previous) < 1e-9) return current === 0 ? 0 : undefined;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
 export default function Index() {
   const [activeTab, setActiveTab] = useState<TabId>("descriptive");
   const [descriptiveReplayFrame, setDescriptiveReplayFrame] = useState<PulseReplayFrame>({
@@ -122,11 +129,21 @@ export default function Index() {
 
   const metricCards = useMemo<MetricCardConfig[]>(() => {
     if (activeTab === "descriptive") {
+      const previousKpis = dashboard.tab1Data?.previous_kpis ?? null;
+      const previousMonthLabel = dashboard.tab1Data?.meta.previous_month
+        ? formatMonthLabel(dashboard.tab1Data.meta.previous_month)
+        : undefined;
+
       return [
         {
           title: "Tỷ lệ rời bỏ lịch sử",
           value: dashboard.tab1Data ? formatPct(dashboard.tab1Data.kpis.historical_churn_rate) : "-",
           subtitle: "Tỷ lệ không quay lại trong 30 ngày sau khi hết hạn",
+          change: relativeChange(
+            dashboard.tab1Data?.kpis.historical_churn_rate,
+            previousKpis?.historical_churn_rate,
+          ),
+          changeLabel: previousMonthLabel,
           icon: AlertTriangle,
           variant: "danger",
           footer: dashboard.tab1Data ? `${formatNumber(dashboard.tab1Data.kpis.total_expiring_users)} khách trong nhóm đang theo dõi` : undefined,
@@ -142,18 +159,31 @@ export default function Index() {
           title: "Tỷ lệ tự gia hạn",
           value: dashboard.tab1Data ? formatPct(dashboard.tab1Data.kpis.auto_renew_rate) : "-",
           subtitle: "Nhóm có khả năng giữ lại tự nhiên tốt hơn",
+          change: relativeChange(
+            dashboard.tab1Data?.kpis.auto_renew_rate,
+            previousKpis?.auto_renew_rate,
+          ),
+          changeLabel: previousMonthLabel,
           icon: Sparkles,
           variant: "success",
           footer: dashboard.currentFilterLabel,
         },
         {
-          title: "Doanh thu theo ngày",
-          value: currentDescriptivePulse ? formatCompactCurrency(Number(currentDescriptivePulse.total_revenue ?? 0)) : "-",
-          subtitle: currentDescriptivePulseDateLabel
-            ? `${currentDescriptivePulseDateLabel} • đang bám theo nhịp trong tháng`
-            : "Doanh thu ngày gần nhất trong tháng đang xem",
+          title: "Doanh thu đang bị đe dọa",
+          value: dashboard.tab1Data
+            ? formatCompactCurrency(Number(dashboard.tab1Data.kpis.historical_revenue_at_risk ?? 0))
+            : "-",
+          subtitle: "Ước tính từ xu hướng rời bỏ lịch sử nhân với doanh thu sắp gia hạn",
+          change: relativeChange(
+            dashboard.tab1Data?.kpis.historical_revenue_at_risk,
+            previousKpis?.historical_revenue_at_risk,
+          ),
+          changeLabel: previousMonthLabel,
           icon: DollarSign,
-          variant: "accent",
+          variant: "warning",
+          footer: dashboard.tab1Data
+            ? `Tổng doanh thu sắp gia hạn ${formatCompactCurrency(Number(dashboard.tab1Data.kpis.total_expected_renewal_amount ?? 0))}`
+            : undefined,
         },
       ];
     }
@@ -391,7 +421,7 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#eef6f7_0%,#f7fafc_18%,#f8fafc_100%)] text-foreground">
-      <div className="mx-auto max-w-[1680px] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="w-full px-4 py-6 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
         <DashboardHeader
           selectedMonth={dashboard.selectedMonth}
           monthOptions={dashboard.monthOptions}
@@ -408,7 +438,7 @@ export default function Index() {
           onReplay={dashboard.triggerReplay}
         />
 
-        <div className="mt-6 grid gap-5 xl:grid-cols-[288px_minmax(0,1fr)]">
+        <div className="mt-6 grid gap-5 xl:grid-cols-[264px_minmax(0,1fr)] 2xl:grid-cols-[288px_minmax(0,1fr)]">
           <aside className="space-y-5">
             <div className="rounded-[28px] border border-white/70 bg-white/88 p-4 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.34)] backdrop-blur">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Điều hướng</p>
@@ -442,7 +472,7 @@ export default function Index() {
           </aside>
 
           <main className="space-y-5">
-            <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px]">
+            <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
               <div className="rounded-[30px] border border-white/70 bg-white/88 p-5 shadow-[0_20px_48px_-34px_rgba(15,23,42,0.34)] backdrop-blur">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">{activeCopy.kicker}</p>
                 <h2 className="mt-3 font-display text-[2rem] font-semibold tracking-[-0.05em] text-slate-950">{activeCopy.title}</h2>
