@@ -79,6 +79,8 @@ TAB2_EXECUTIVE_RISK_LONG_LABELS = {
     "Low": "Low (Prob < 0.4)",
     "Unknown": "Unknown",
 }
+TAB2_EXECUTIVE_MATRIX_MIN_USER_COUNT = 10
+TAB2_EXECUTIVE_MATRIX_MAX_RENEWAL_AMOUNT = 250.0
 TAB2_FEATURE_GROUP_LABELS = {
     "segment_flags": "Dấu hiệu phân khúc",
     "payment_value": "Thanh toán & giá trị",
@@ -1233,6 +1235,12 @@ def _normalize_tab2_executive_value_risk_matrix(df: pd.DataFrame, target_month: 
     work["revenue_at_risk"] = pd.to_numeric(_frame_series_or_default(work, "revenue_at_risk", 0.0), errors="coerce").fillna(0.0)
     if "risk_tier" not in work.columns and "risk_band" in work.columns:
         work["risk_tier"] = _to_executive_risk_band(work["risk_band"])
+    work = work.loc[
+        (work["expected_renewal_amount"] <= TAB2_EXECUTIVE_MATRIX_MAX_RENEWAL_AMOUNT)
+        & (work["user_count"] >= TAB2_EXECUTIVE_MATRIX_MIN_USER_COUNT)
+    ].copy()
+    if work.empty:
+        return []
     if "display_size" not in work.columns:
         work["display_size"] = np.sqrt(work["user_count"].clip(lower=1)).astype("float64")
     if "priority_quadrant" not in work.columns:
@@ -2289,6 +2297,12 @@ def _build_executive_value_risk_matrix(df: pd.DataFrame) -> list[dict[str, Any]]
         .sort_values(["prob_bin", "expected_renewal_amount", "user_count"], ascending=[True, True, False])
         .reset_index(drop=True)
     )
+    grouped = grouped.loc[
+        (grouped["expected_renewal_amount"] <= TAB2_EXECUTIVE_MATRIX_MAX_RENEWAL_AMOUNT)
+        & (grouped["user_count"] >= TAB2_EXECUTIVE_MATRIX_MIN_USER_COUNT)
+    ].copy()
+    if grouped.empty:
+        return []
     grouped["risk_tier"] = _to_executive_risk_band(grouped["risk_band"])
     grouped["display_size"] = np.sqrt(grouped["user_count"].clip(lower=1)).astype("float64")
     grouped["priority_quadrant"] = np.select(

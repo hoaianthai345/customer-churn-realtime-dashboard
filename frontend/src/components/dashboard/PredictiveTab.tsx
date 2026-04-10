@@ -108,6 +108,8 @@ const RISK_BAND_COLORS: Record<string, string> = {
   High: "#EF553B",
   Unknown: "#94a3b8",
 };
+const EXECUTIVE_MATRIX_MIN_USER_COUNT = 10;
+const EXECUTIVE_MATRIX_MAX_RENEWAL_AMOUNT = 250;
 const MATRIX_RISK_BAND_COLORS: Record<string, string> = {
   "Very Low": "#27ae60",
   Low: "#00CC96",
@@ -154,7 +156,15 @@ export default function PredictiveTab({
   const initialLoading = loading && !data;
   const switchingDataset = loading && !!data;
   const revenueLossOutlook = useMemo(() => data?.revenue_loss_outlook ?? [], [data?.revenue_loss_outlook]);
-  const executiveMatrix = useMemo(() => data?.executive_value_risk_matrix ?? [], [data?.executive_value_risk_matrix]);
+  const executiveMatrix = useMemo(
+    () =>
+      (data?.executive_value_risk_matrix ?? []).filter(
+        (row) =>
+          Number(row.expected_renewal_amount ?? 0) <= EXECUTIVE_MATRIX_MAX_RENEWAL_AMOUNT &&
+          Number(row.user_count ?? 0) >= EXECUTIVE_MATRIX_MIN_USER_COUNT,
+      ),
+    [data?.executive_value_risk_matrix],
+  );
   const riskBandMix = useMemo(
     () => (data?.risk_band_mix ?? []).map((row) => ({ ...row, band_label: RISK_BAND_LABELS[row.band] ?? row.band })),
     [data?.risk_band_mix],
@@ -370,7 +380,7 @@ export default function PredictiveTab({
 
         <ChartCard
           title="Ma trận Vị thế Khách hàng theo Giá trị và Rủi ro"
-          subtitle="Bám theo notebook: nhóm theo prob_bin 0.1, expected_renewal_amount thực tế và risk_band; trục cắt tại 50% churn và NT$100."
+          subtitle="Bám theo notebook nhưng cắt trục giá trị tại NT$250 và ẩn các bubble dưới 10 khách để giảm nhiễu outlier; trục cắt tại 50% churn và NT$100."
           action={
             <div className="rounded-full bg-rose-50 px-3 py-1.5 text-right">
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-600">Must Save</div>
