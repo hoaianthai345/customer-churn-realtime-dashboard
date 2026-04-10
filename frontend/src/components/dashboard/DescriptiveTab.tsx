@@ -32,7 +32,6 @@ import {
   DEMO_MODE,
   DIMENSION_LABELS,
   SEGMENT_LABELS,
-  buildKmChartData,
   clamp,
   formatCompactCurrency,
   formatCurrency,
@@ -61,7 +60,6 @@ type DescriptiveTabProps = {
   onClearFilter: () => void;
 };
 
-const KM_COLORS = ["#0f766e", "#2563eb", "#f59e0b", "#e11d48", "#7c3aed"];
 const CHURN_FLOOR_PCT = 0;
 const CHURN_WARNING_PCT = 4.5;
 const CHURN_CRITICAL_PCT = 5.5;
@@ -154,6 +152,12 @@ function computeDynamicDomain(
   return [Number(lower.toFixed(4)), Number(upper.toFixed(4))];
 }
 
+function normalizeRatioToPct(value: number | null | undefined): number {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return clamp(numeric <= 1 ? numeric * 100 : numeric, 0, 100);
+}
+
 function DescriptiveTab({
   data,
   snapshot,
@@ -168,7 +172,6 @@ function DescriptiveTab({
   onToggleSegmentFilter,
   onClearFilter,
 }: DescriptiveTabProps) {
-  const kmData = useMemo(() => buildKmChartData(data?.km_curve ?? []), [data?.km_curve]);
   const monthlyTrend = useMemo(
     () => [...(data?.monthly_trend ?? [])].sort((a, b) => a.target_month - b.target_month),
     [data?.monthly_trend],
@@ -257,6 +260,15 @@ function DescriptiveTab({
         .slice(0, 5),
     [data?.boredom_scatter],
   );
+  const behaviorScatterPoints = useMemo(
+    () =>
+      behaviorFocusPoints.map((point) => ({
+        ...point,
+        discovery_pct: normalizeRatioToPct(point.discovery_ratio),
+        skip_pct: normalizeRatioToPct(point.skip_ratio),
+      })),
+    [behaviorFocusPoints],
+  );
   const selectedFilterLabel =
     segmentFilter.segmentType && segmentFilter.segmentValue
       ? `${SEGMENT_LABELS[segmentFilter.segmentType]}: ${segmentFilter.segmentValue}`
@@ -295,21 +307,6 @@ function DescriptiveTab({
     () => Math.max(CHURN_CRITICAL_PCT + 0.8, ...trendSeries.map((point) => Number(point.historical_churn_rate ?? 0) + 0.3)),
     [trendSeries],
   );
-  const kmYAxisDomain = useMemo(() => {
-    const kmValues = kmData.flatMap((row) =>
-      Object.entries(row)
-        .filter(([key]) => key !== "day")
-        .map(([, value]) => Number(value)),
-    );
-    return computeDynamicDomain(kmValues, {
-      paddingRatio: 0.08,
-      minSpan: 12,
-      clampMin: 0,
-      clampMax: 100,
-      anchorMax: 100,
-      step: 2,
-    });
-  }, [kmData]);
   const revenueYAxisDomain = useMemo(
     () =>
       computeDynamicDomain(
@@ -386,61 +383,19 @@ function DescriptiveTab({
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.72fr)_320px] 2xl:grid-cols-[minmax(0,1.58fr)_360px]">
-        <ChartCard
-          title="Tốc độ rời bỏ khách hàng theo thời gian"
-          subtitle="Mỗi đường là một nhóm khách. Đường nào dốc xuống nhanh hơn thì nhóm đó rời đi sớm hơn trong thực tế kinh doanh."
-          className="min-h-[360px]"
-        >
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-              {DIMENSION_LABELS[dimension]}
-            </span>
-            {selectedFilterLabel ? (
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{selectedFilterLabel}</span>
-            ) : null}
+      <section className="rounded-[28px] border border-white/70 bg-white/88 p-5 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.34)] backdrop-blur">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Tóm tắt điều hành</p>
+            <h3 className="mt-2 font-display text-xl font-semibold tracking-[-0.03em] text-foreground">Điểm cần nhìn ngay</h3>
           </div>
-          <div className="mb-4 rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-            Đường dốc xuống càng nhanh thì khách hàng rời bỏ càng sớm. Nhìn vào nhóm rơi nhanh nhất để ưu tiên hành động trước.
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
+            <Filter className="h-4 w-4" />
           </div>
-          {kmData.length ? (
-            <ResponsiveContainer width="100%" height={312}>
-              <LineChart data={kmData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
-                <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} domain={kmYAxisDomain} tickFormatter={(value) => `${value}%`} />
-                <Tooltip formatter={(value: number) => formatPct(Number(value), 1)} />
-                <Legend />
-                {data.km_curve.map((entry, index) => (
-                  <Line
-                    key={entry.dimension_value}
-                    type="monotone"
-                    dataKey={entry.dimension_value}
-                    stroke={KM_COLORS[index % KM_COLORS.length]}
-                    strokeWidth={2.5}
-                    dot={false}
-                    name={entry.dimension_value}
-                  />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <StatePanel title="Chưa có đường xu hướng giữ chân" description="Tháng hiện tại chưa có đủ dữ liệu để vẽ diễn biến giữ chân theo thời gian." />
-          )}
-        </ChartCard>
+        </div>
 
-        <section className="rounded-[28px] border border-white/70 bg-white/88 p-5 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.34)] backdrop-blur">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Tóm tắt điều hành</p>
-              <h3 className="mt-2 font-display text-xl font-semibold tracking-[-0.03em] text-foreground">Điểm cần nhìn ngay</h3>
-            </div>
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
-              <Filter className="h-4 w-4" />
-            </div>
-          </div>
-
-          <div className="mt-5">
+        <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Tiêu chí chia nhóm</p>
             <Select value={dimension} onValueChange={(value) => onDimensionChange(value as Tab1Dimension)}>
               <SelectTrigger className="h-11 rounded-2xl border-slate-200 bg-slate-50">
@@ -454,29 +409,29 @@ function DescriptiveTab({
                 ))}
               </SelectContent>
             </Select>
-          </div>
 
-          <div className="mt-4 rounded-[22px] bg-slate-50 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Phạm vi đang áp dụng</p>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {selectedFilterLabel
-                    ? selectedFilterLabel
-                    : DEMO_MODE
-                      ? "Bộ lọc này hiện áp dụng cho lớp hiện trạng; các lớp còn lại giữ cùng một phạm vi theo tháng đang chọn."
-                      : "Chọn một nhóm ở phần dưới nếu muốn giữ nguyên phạm vi xem cho cả ba tab."}
-                </p>
+            <div className="mt-4 rounded-[22px] bg-slate-50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Phạm vi đang áp dụng</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    {selectedFilterLabel
+                      ? selectedFilterLabel
+                      : DEMO_MODE
+                        ? "Bộ lọc này hiện áp dụng cho lớp hiện trạng; các lớp còn lại giữ cùng một phạm vi theo tháng đang chọn."
+                        : "Chọn một nhóm ở phần dưới nếu muốn giữ nguyên phạm vi xem cho cả ba tab."}
+                  </p>
+                </div>
+                {selectedFilterLabel ? (
+                  <Button variant="outline" onClick={onClearFilter} className="rounded-full border-slate-300">
+                    Bỏ lọc
+                  </Button>
+                ) : null}
               </div>
-              {selectedFilterLabel ? (
-                <Button variant="outline" onClick={onClearFilter} className="rounded-full border-slate-300">
-                  Bỏ lọc
-                </Button>
-              ) : null}
             </div>
           </div>
 
-          <div className="mt-4 space-y-3">
+          <div className="grid gap-3 md:grid-cols-3">
             <ExecutiveSignal
               icon={Sparkles}
               title="Rời bỏ mạnh nhất"
@@ -508,8 +463,8 @@ function DescriptiveTab({
               }
             />
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       {hasMultiMonthTrend ? (
         <>
@@ -834,23 +789,25 @@ function DescriptiveTab({
           action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Top {behaviorFocusPoints.length || 0} cụm</span>}
           className="min-h-[360px]"
         >
-          {behaviorFocusPoints.length ? (
+          {behaviorScatterPoints.length ? (
             <ResponsiveContainer width="100%" height={324}>
               <ScatterChart margin={{ top: 16, right: 12, bottom: 12, left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                 <XAxis
-                  dataKey="discovery_ratio"
+                  type="number"
+                  dataKey="discovery_pct"
                   name="Tỷ lệ khám phá"
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatPct(Number(value) * 100, 0)}
-                  domain={[0, 1]}
+                  tickFormatter={(value) => formatPct(Number(value), 0)}
+                  domain={[0, 100]}
                 />
                 <YAxis
-                  dataKey="skip_ratio"
+                  type="number"
+                  dataKey="skip_pct"
                   name="Tỷ lệ bỏ qua"
                   tick={{ fontSize: 12 }}
-                  tickFormatter={(value) => formatPct(Number(value) * 100, 0)}
-                  domain={[0, 1]}
+                  tickFormatter={(value) => formatPct(Number(value), 0)}
+                  domain={[0, 100]}
                 />
                 <ZAxis dataKey="revenue_at_risk" range={[160, 980]} />
                 <Tooltip
@@ -858,14 +815,14 @@ function DescriptiveTab({
                     if (name === "churn_rate_pct") return [formatPct(Number(value), 1), "Tỷ lệ rời bỏ"];
                     if (name === "revenue_at_risk") return [formatCurrency(Number(value)), "Doanh thu bị đe dọa"];
                     if (name === "users") return [formatNumber(Number(value)), "Số khách"];
-                    if (name === "discovery_ratio") return [formatPct(Number(value) * 100, 0), "Mức khám phá"];
-                    if (name === "skip_ratio") return [formatPct(Number(value) * 100, 0), "Mức bỏ qua"];
+                    if (name === "discovery_pct") return [formatPct(Number(value), 0), "Mức khám phá"];
+                    if (name === "skip_pct") return [formatPct(Number(value), 0), "Mức bỏ qua"];
                     return Number(value).toFixed(2);
                   }}
                   labelFormatter={(_, payload) => String(payload?.[0]?.payload?.cluster_label ?? "Cụm hành vi")}
                 />
-                <Scatter data={behaviorFocusPoints}>
-                  {behaviorFocusPoints.map((point, index) => (
+                <Scatter data={behaviorScatterPoints}>
+                  {behaviorScatterPoints.map((point, index) => (
                     <Cell key={`scatter-${index}`} fill={BEHAVIOR_CLUSTER_COLORS[index % BEHAVIOR_CLUSTER_COLORS.length]} />
                   ))}
                 </Scatter>
