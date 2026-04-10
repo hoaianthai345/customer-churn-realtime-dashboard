@@ -490,7 +490,7 @@ export default function Index() {
           <main className="space-y-5">
             {activeTab === "descriptive" ? (
               <DescriptivePulsePanel onReplayFrameChange={handleDescriptiveReplayFrameChange} snapshot={dashboard.snapshot} />
-            ) : (
+            ) : activeTab === "prescriptive" ? (
               <>
                 <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
                   <div className="rounded-[30px] border border-white/70 bg-white/88 p-5 shadow-[0_20px_48px_-34px_rgba(15,23,42,0.34)] backdrop-blur">
@@ -528,7 +528,7 @@ export default function Index() {
                   ))}
                 </section>
               </>
-            )}
+            ) : null}
 
             {activeTab === "descriptive" ? (
               <DescriptiveTab

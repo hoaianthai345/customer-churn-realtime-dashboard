@@ -68,6 +68,92 @@ const CHURN_CRITICAL_PCT = 5.5;
 const CHURN_DONUT_COLORS = ["#10b981", "#ef4444"];
 const BEHAVIOR_CLUSTER_COLORS = ["#0f172a", "#1d4ed8", "#2563eb", "#60a5fa", "#93c5fd"];
 
+function toFiniteNumbers(values: Array<number | null | undefined>): number[] {
+  return values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+}
+
+function roundDownToStep(value: number, step: number): number {
+  return Math.floor(value / step) * step;
+}
+
+function roundUpToStep(value: number, step: number): number {
+  return Math.ceil(value / step) * step;
+}
+
+function pickAxisStep(range: number): number {
+  if (range <= 1) return 0.1;
+  if (range <= 5) return 0.25;
+  if (range <= 10) return 0.5;
+  if (range <= 30) return 1;
+  if (range <= 100) return 5;
+  if (range <= 500) return 20;
+  if (range <= 2_000) return 50;
+  if (range <= 10_000) return 200;
+  if (range <= 50_000) return 1_000;
+  return 5_000;
+}
+
+function computeDynamicDomain(
+  values: Array<number | null | undefined>,
+  options: {
+    paddingRatio?: number;
+    minSpan?: number;
+    clampMin?: number;
+    clampMax?: number;
+    anchorMin?: number;
+    anchorMax?: number;
+    step?: number;
+  } = {},
+): [number, number] {
+  const {
+    paddingRatio = 0.12,
+    minSpan = 1,
+    clampMin,
+    clampMax,
+    anchorMin,
+    anchorMax,
+    step,
+  } = options;
+  const finite = toFiniteNumbers(values);
+
+  let minValue = finite.length ? Math.min(...finite) : anchorMin ?? clampMin ?? 0;
+  let maxValue = finite.length ? Math.max(...finite) : anchorMax ?? clampMax ?? minValue + minSpan;
+
+  if (anchorMin != null) minValue = Math.min(minValue, anchorMin);
+  if (anchorMax != null) maxValue = Math.max(maxValue, anchorMax);
+
+  const spread = maxValue - minValue;
+  const padding = spread > 0 ? spread * paddingRatio : minSpan * 0.5;
+  let lower = minValue - padding;
+  let upper = maxValue + padding;
+
+  if (upper - lower < minSpan) {
+    const midpoint = (upper + lower) / 2;
+    lower = midpoint - minSpan / 2;
+    upper = midpoint + minSpan / 2;
+  }
+
+  if (clampMin != null) lower = Math.max(lower, clampMin);
+  if (clampMax != null) upper = Math.min(upper, clampMax);
+
+  const effectiveStep = step ?? pickAxisStep(upper - lower);
+  lower = roundDownToStep(lower, effectiveStep);
+  upper = roundUpToStep(upper, effectiveStep);
+
+  if (clampMin != null) lower = Math.max(lower, clampMin);
+  if (clampMax != null) upper = Math.min(upper, clampMax);
+
+  if (upper - lower < minSpan) {
+    upper = lower + minSpan;
+    if (clampMax != null && upper > clampMax) {
+      upper = clampMax;
+      lower = Math.max(clampMin ?? Number.NEGATIVE_INFINITY, upper - minSpan);
+    }
+  }
+
+  return [Number(lower.toFixed(4)), Number(upper.toFixed(4))];
+}
+
 function DescriptiveTab({
   data,
   snapshot,
@@ -209,6 +295,68 @@ function DescriptiveTab({
     () => Math.max(CHURN_CRITICAL_PCT + 0.8, ...trendSeries.map((point) => Number(point.historical_churn_rate ?? 0) + 0.3)),
     [trendSeries],
   );
+  const kmYAxisDomain = useMemo(() => {
+    const kmValues = kmData.flatMap((row) =>
+      Object.entries(row)
+        .filter(([key]) => key !== "day")
+        .map(([, value]) => Number(value)),
+    );
+    return computeDynamicDomain(kmValues, {
+      paddingRatio: 0.08,
+      minSpan: 12,
+      clampMin: 0,
+      clampMax: 100,
+      anchorMax: 100,
+      step: 2,
+    });
+  }, [kmData]);
+  const revenueYAxisDomain = useMemo(
+    () =>
+      computeDynamicDomain(
+        trendSeries.flatMap((point) => [point.total_expected_renewal_amount, point.historical_revenue_at_risk]),
+        {
+          paddingRatio: 0.12,
+          minSpan: 20_000,
+          clampMin: 0,
+        },
+      ),
+    [trendSeries],
+  );
+  const apruYAxisDomain = useMemo(
+    () =>
+      computeDynamicDomain(
+        trendSeries.map((point) => point.apru),
+        {
+          paddingRatio: 0.16,
+          minSpan: 20,
+          clampMin: 0,
+        },
+      ),
+    [trendSeries],
+  );
+  const churnYAxisDomain = useMemo(() => {
+    const [lower, upper] = computeDynamicDomain(
+      trendSeries.map((point) => Number(point.historical_churn_rate ?? 0)),
+      {
+        paddingRatio: 0.18,
+        minSpan: 1.2,
+        clampMin: 0,
+        anchorMax:
+          Math.max(...trendSeries.map((point) => Number(point.historical_churn_rate ?? 0)), 0) < CHURN_WARNING_PCT
+            ? CHURN_WARNING_PCT + 0.3
+            : churnBandCeiling,
+        step: 0.2,
+      },
+    );
+    return {
+      lower,
+      upper,
+      greenUpper: Math.min(CHURN_WARNING_PCT, upper),
+      amberLower: Math.max(lower, CHURN_WARNING_PCT),
+      amberUpper: Math.min(CHURN_CRITICAL_PCT, upper),
+      redLower: Math.max(lower, CHURN_CRITICAL_PCT),
+    };
+  }, [churnBandCeiling, trendSeries]);
   const riskHeatmapRows = useMemo(() => {
     const rows = data?.risk_heatmap ?? [];
     const maxUsers = Math.max(1, ...rows.map((row) => Number(row.users ?? 0)));
@@ -260,7 +408,7 @@ function DescriptiveTab({
               <LineChart data={kmData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                 <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} domain={[0, 100]} tickFormatter={(value) => `${value}%`} />
+                <YAxis tick={{ fontSize: 12 }} domain={kmYAxisDomain} tickFormatter={(value) => `${value}%`} />
                 <Tooltip formatter={(value: number) => formatPct(Number(value), 1)} />
                 <Legend />
                 {data.km_curve.map((entry, index) => (
@@ -411,7 +559,7 @@ function DescriptiveTab({
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                     <XAxis dataKey="month_label" tick={{ fontSize: 12 }} tickFormatter={(value) => formatMonthLabel(String(value))} />
-                    <YAxis tick={{ fontSize: 12 }} tickFormatter={(value) => formatCompactCurrency(Number(value))} />
+                    <YAxis domain={revenueYAxisDomain} tick={{ fontSize: 12 }} tickFormatter={(value) => formatCompactCurrency(Number(value))} />
                     <Tooltip
                       labelFormatter={(value) => formatMonthLabel(String(value))}
                       formatter={(value: number, name: string) => {
@@ -454,7 +602,7 @@ function DescriptiveTab({
                   <LineChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
                     <XAxis dataKey="month_label" tick={{ fontSize: 12 }} tickFormatter={(value) => formatMonthLabel(String(value))} />
-                    <YAxis tick={{ fontSize: 12 }} />
+                    <YAxis domain={apruYAxisDomain} tick={{ fontSize: 12 }} />
                     <Tooltip
                       labelFormatter={(value) => formatMonthLabel(String(value))}
                       formatter={(value: number) => [formatCurrency(Number(value)), "APRU"]}
@@ -477,11 +625,17 @@ function DescriptiveTab({
               <ResponsiveContainer width="100%" height={292}>
                 <LineChart data={trendSeries} margin={{ top: 12, right: 8, left: 8, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
-                  <ReferenceArea y1={CHURN_FLOOR_PCT} y2={CHURN_WARNING_PCT} fill="rgba(16,185,129,0.08)" />
-                  <ReferenceArea y1={CHURN_WARNING_PCT} y2={CHURN_CRITICAL_PCT} fill="rgba(245,158,11,0.15)" />
-                  <ReferenceArea y1={CHURN_CRITICAL_PCT} y2={churnBandCeiling} fill="rgba(239,68,68,0.12)" />
+                  {churnYAxisDomain.lower < churnYAxisDomain.greenUpper ? (
+                    <ReferenceArea y1={churnYAxisDomain.lower} y2={churnYAxisDomain.greenUpper} fill="rgba(16,185,129,0.08)" />
+                  ) : null}
+                  {churnYAxisDomain.amberLower < churnYAxisDomain.amberUpper ? (
+                    <ReferenceArea y1={churnYAxisDomain.amberLower} y2={churnYAxisDomain.amberUpper} fill="rgba(245,158,11,0.15)" />
+                  ) : null}
+                  {churnYAxisDomain.redLower < churnYAxisDomain.upper ? (
+                    <ReferenceArea y1={churnYAxisDomain.redLower} y2={churnYAxisDomain.upper} fill="rgba(239,68,68,0.12)" />
+                  ) : null}
                   <XAxis dataKey="month_label" tick={{ fontSize: 12 }} tickFormatter={(value) => formatMonthLabel(String(value))} />
-                  <YAxis domain={[CHURN_FLOOR_PCT, churnBandCeiling]} tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
+                  <YAxis domain={[churnYAxisDomain.lower, churnYAxisDomain.upper]} tick={{ fontSize: 12 }} tickFormatter={(value) => `${Number(value).toFixed(1)}%`} />
                   <Tooltip
                     labelFormatter={(value) => formatMonthLabel(String(value))}
                     formatter={(value: number) => [formatPct(Number(value), 1), "Tỷ lệ rời bỏ"]}
