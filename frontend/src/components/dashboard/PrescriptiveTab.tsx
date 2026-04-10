@@ -196,7 +196,7 @@ export default function PrescriptiveTab({
             />
           </div>
 
-          {DEMO_MODE && availableScenarios.length > 0 ? (
+          {availableScenarios.length > 0 ? (
             <div className="mt-5 grid gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Kịch bản có sẵn</p>
@@ -243,9 +243,9 @@ export default function PrescriptiveTab({
           </div>
 
           <div className="mt-5 rounded-[22px] bg-slate-50 p-4 text-sm leading-6 text-slate-600">
-            {DEMO_MODE ? (
+            {availableScenarios.length > 0 ? (
               <>
-                Mỗi preset là một phương án hành động khác nhau; chọn preset để đổi tình huống, còn thanh kéo phản ánh mức can thiệp của phương án đang xem.
+                Mỗi preset là một phương án hành động khác nhau; chọn preset để đổi tình huống, rồi dùng thanh kéo để tinh chỉnh mức can thiệp của phương án đang xem.
               </>
             ) : (
               <>
