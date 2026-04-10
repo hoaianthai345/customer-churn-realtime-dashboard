@@ -48,6 +48,10 @@ Notebook:
 
 - `tab1/kkbox-descriptive-tab.ipynb`
 
+Optional notebook neu can pulse context dung logic thang truoc:
+
+- `tab1/kkbox-preexpiry-pulse-context.ipynb`
+
 Input:
 
 - feature store canonical
@@ -64,6 +68,36 @@ Khi nào cần sửa `FEATURE_STORE_ROOT_HINT`:
 Output:
 
 - `artifacts_tab1_descriptive/`
+
+### Tab 1 pre-expiry pulse context
+
+Notebook:
+
+- `tab1/kkbox-preexpiry-pulse-context.ipynb`
+
+Input:
+
+- feature store canonical
+- raw KKBOX competition data co `transactions_v2.csv(.7z)` va `user_logs_v2.csv(.7z)`
+
+Bien can kiem tra:
+
+- `FEATURE_STORE_ROOT_HINT = None`
+- `RAW_DATA_ROOT_HINT = None`
+- `TARGET_MONTH = 201704`
+- `OUTPUT_DIR = 'artifacts_tab1_preexpiry_pulse'`
+
+Output:
+
+- `artifacts_tab1_preexpiry_pulse/tab1_preexpiry_pulse_daily_201704.parquet`
+- `artifacts_tab1_preexpiry_pulse/tab1_preexpiry_pulse_summary_201704.json`
+- `artifacts_tab1_preexpiry_pulse/manifest.json`
+
+Muc dich nghiep vu:
+
+- cohort van la cohort sap het han cua `201704`
+- chuoi theo ngay dung de trinh bay la thang truoc, tuc `201703`
+- artifact nay de backend/frontend doc vao pulse panel ma khong dung nham nhiep ben trong `201704`
 
 ### Tab 2
 

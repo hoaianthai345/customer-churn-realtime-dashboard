@@ -51,6 +51,7 @@ type DescriptiveTabProps = {
   snapshot: SnapshotPayload | null;
   loading: boolean;
   onReplayFrameChange?: (frame: PulseReplayFrame) => void;
+  hidePulsePanel?: boolean;
   error: string | null;
   selectedMonth: string;
   dimension: Tab1Dimension;
@@ -72,6 +73,7 @@ function DescriptiveTab({
   snapshot,
   loading,
   onReplayFrameChange,
+  hidePulsePanel = false,
   error,
   selectedMonth,
   dimension,
@@ -571,7 +573,7 @@ function DescriptiveTab({
 
         <ChartCard
           title="Value Tier × Risk Customer Segment"
-          subtitle="Khôi phục heatmap snapshot theo đúng layout ở notebook/HTML khi nguồn hiện tại có đủ dữ liệu."
+          subtitle="Phân khúc khách hàng và khả năng rời bỏ"
           className="min-h-[340px]"
         >
           {riskHeatmapRows.length ? (
@@ -674,7 +676,7 @@ function DescriptiveTab({
 
         <ChartCard
           title="Top cụm hành vi đang đe dọa doanh thu"
-          subtitle="Chỉ giữ các cụm có doanh thu rủi ro cao nhất để tránh mỏi mắt. Trục ngang là mức khám phá, trục dọc là mức bỏ qua."
+          subtitle=""
           action={<span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">Top {behaviorFocusPoints.length || 0} cụm</span>}
           className="min-h-[360px]"
         >
@@ -721,10 +723,10 @@ function DescriptiveTab({
         </ChartCard>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_320px] 2xl:grid-cols-[minmax(0,1.15fr)_360px]">
-        <DescriptivePulsePanel onReplayFrameChange={onReplayFrameChange} snapshot={snapshot} />
+      <div className={hidePulsePanel ? "grid gap-4 md:grid-cols-3" : "grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_320px] 2xl:grid-cols-[minmax(0,1.15fr)_360px]"}>
+        {!hidePulsePanel ? <DescriptivePulsePanel onReplayFrameChange={onReplayFrameChange} snapshot={snapshot} /> : null}
 
-        <div className="grid gap-4 self-start">
+        <div className={hidePulsePanel ? "grid gap-4 md:grid-cols-3" : "grid gap-4 self-start"}>
           <InsightCard
             type="warning"
             title="Điều gì đang nổi lên?"

@@ -12,6 +12,7 @@ Mục tiêu:
 ## Cấu trúc
 
 - `tab1/kkbox-descriptive-tab.ipynb`
+- `tab1/kkbox-preexpiry-pulse-context.ipynb`
 - `tab2/kkbox-train-predictive-tab.ipynb`
 - `tab3/kkbox-simulation-2.ipynb`
 - `tab3/kkbox-simulation-monte-carlo.ipynb`
@@ -23,10 +24,11 @@ Mục tiêu:
 ## Thứ tự chạy
 
 1. Chuẩn bị dataset `feature_store`
-2. Chạy `tab1/kkbox-descriptive-tab.ipynb`
-3. Chạy `tab2/kkbox-train-predictive-tab.ipynb`
-4. Chạy `tab3/kkbox-simulation-2.ipynb`
-5. Nếu cần uncertainty / phụ lục nâng cao, chạy thêm `tab3/kkbox-simulation-monte-carlo.ipynb`
+2. Nếu cần pulse context đúng logic cho `target_month`, chạy thêm `tab1/kkbox-preexpiry-pulse-context.ipynb`
+3. Chạy `tab1/kkbox-descriptive-tab.ipynb`
+4. Chạy `tab2/kkbox-train-predictive-tab.ipynb`
+5. Chạy `tab3/kkbox-simulation-2.ipynb`
+6. Nếu cần uncertainty / phụ lục nâng cao, chạy thêm `tab3/kkbox-simulation-monte-carlo.ipynb`
 
 Luồng precompute nhiều preset cho web demo:
 

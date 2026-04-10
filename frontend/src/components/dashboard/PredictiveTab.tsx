@@ -139,6 +139,8 @@ const SANKEY_RISK_LEGEND = [
   { label: "Luồng Low", color: "#10b981" },
 ];
 
+const PROBABILITY_TICKS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+
 export default function PredictiveTab({
   data,
   loading,
@@ -158,10 +160,6 @@ export default function PredictiveTab({
     [data?.risk_band_mix],
   );
   const matrixMidpoints = useMemo(() => ({ risk: 0.5, value: 100 }), []);
-  const matrixValueCeiling = useMemo(
-    () => Math.max(140, ...executiveMatrix.map((row) => Number(row.expected_renewal_amount ?? 0) + 12)),
-    [executiveMatrix],
-  );
   const waterfallData = useMemo(() => buildWaterfallSeries(data?.feature_group_waterfall ?? []), [data?.feature_group_waterfall]);
   const topPrescription = data?.prescriptions?.[0] ?? null;
   const priorityRows = useMemo(() => (data?.prescriptions ?? []).slice(0, 6), [data?.prescriptions]);
@@ -363,7 +361,6 @@ export default function PredictiveTab({
                 <p className="mt-1 font-display text-xl font-semibold tracking-[-0.05em] text-slate-950">
                   {formatCompactCurrency(data.kpis.predicted_revenue_at_risk)}
                 </p>
-                <p className="mt-1 text-xs text-slate-600">{topRiskBand?.band_label ?? "Unknown"} đang chiếm tỷ trọng lớn nhất</p>
               </div>
             </div>
           ) : (
@@ -373,7 +370,7 @@ export default function PredictiveTab({
 
         <ChartCard
           title="Ma trận Vị thế Khách hàng theo Giá trị và Rủi ro"
-          subtitle="Nhìn nhanh nhóm nào vừa giá trị cao vừa rủi ro cao. Ô Must Save là phần doanh thu cần giữ bằng mọi giá trong quý này."
+          subtitle="Bám theo notebook: nhóm theo prob_bin 0.1, expected_renewal_amount thực tế và risk_band; trục cắt tại 50% churn và NT$100."
           action={
             <div className="rounded-full bg-rose-50 px-3 py-1.5 text-right">
               <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-600">Must Save</div>
@@ -389,14 +386,22 @@ export default function PredictiveTab({
               <ResponsiveContainer width="100%" height="100%">
                 <ScatterChart margin={{ top: 18, right: 18, bottom: 16, left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.24)" />
-                  <XAxis dataKey="prob_bin" tick={{ fontSize: 12 }} domain={[0, 1]} tickFormatter={(value) => `${Math.round(Number(value) * 100)}%`} />
+                  <XAxis
+                    type="number"
+                    dataKey="prob_bin"
+                    tick={{ fontSize: 12 }}
+                    domain={[-0.05, 1.05]}
+                    ticks={PROBABILITY_TICKS}
+                    tickFormatter={(value) => `${Math.round(Number(value) * 100)}%`}
+                  />
                   <YAxis
+                    type="number"
                     dataKey="expected_renewal_amount"
                     tick={{ fontSize: 12 }}
-                    domain={[0, matrixValueCeiling]}
+                    domain={[0, 250]}
                     tickFormatter={(value) => formatCompactCurrency(Number(value))}
                   />
-                  <ZAxis dataKey="display_size" range={[120, 1000]} />
+                  <ZAxis dataKey="display_size" range={[40, 1600]} />
                   <ReferenceLine x={matrixMidpoints.risk} stroke="rgba(100,116,139,0.65)" strokeDasharray="7 7" />
                   <ReferenceLine y={matrixMidpoints.value} stroke="rgba(100,116,139,0.65)" strokeDasharray="7 7" />
                   <Tooltip content={<MatrixTooltip />} cursor={{ strokeDasharray: "4 4" }} />
@@ -422,7 +427,7 @@ export default function PredictiveTab({
                 <div className="absolute bottom-3 left-3 rounded-full bg-white/90 px-3 py-1 text-[11px] font-semibold tracking-[0.08em] text-sky-700">
                   KHÁCH VÃNG LAI
                 </div>
-                <div className="absolute bottom-3 right-3 rounded-full bg-white/90 px-3 py-1 text-[11px] font-semibold tracking-[0.08em] text-amber-700">
+                <div className="absolute bottom-3 right-3 rounded-full bg-white/90 px-3 py-1 text-[11px] font-semibold tracking-[0.08em] text-slate-600">
                   NHÓM NHẠY CẢM GIÁ
                 </div>
               </div>
@@ -586,7 +591,7 @@ export default function PredictiveTab({
       <div className={`grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_320px] 2xl:grid-cols-[minmax(0,1.25fr)_360px] ${contentTransitionClass}`}>
         <ChartCard
           title="Doanh thu dự kiến mất đi trong 3, 6, 12 tháng tới"
-          subtitle="Thay đường decay bằng ba mốc tiền tệ tích lũy để ban điều hành nhìn nhanh mức tổn thất nếu không can thiệp."
+          subtitle="Mức tổn thất nếu không can thiệp."
           className="min-h-[340px]"
         >
           {revenueLossOutlook.length ? (
@@ -807,6 +812,7 @@ function MatrixTooltip({ active, payload }: MatrixTooltipProps) {
         <p>{formatCurrency(Number(row.expected_renewal_amount))} mức chi tiêu</p>
         <p>{formatNumber(Number(row.user_count))} khách</p>
         <p>{formatCurrency(Number(row.revenue_at_risk))} doanh thu rủi ro</p>
+        {row.priority_quadrant ? <p>Nhóm chiến lược: {row.priority_quadrant}</p> : null}
       </div>
     </div>
   );

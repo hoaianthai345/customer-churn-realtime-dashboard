@@ -19,6 +19,7 @@ import {
   buildSnapshotPulse,
   formatCompactCurrency,
   formatCurrency,
+  formatMonthLabel,
   formatNumber,
   formatPct,
   formatPulseDateLabel,
@@ -36,6 +37,16 @@ function DescriptivePulsePanel({ onReplayFrameChange, snapshot }: DescriptivePul
   const pulseData = useMemo(() => buildSnapshotPulse(snapshot), [snapshot]);
   const [replayIndex, setReplayIndex] = useState(0);
   const [replayStatus, setReplayStatus] = useState<PulseReplayStatus>("idle");
+  const targetMonthLabel = useMemo(() => formatMonthLabel(snapshot?.meta.month), [snapshot?.meta.month]);
+  const contextMonthLabel = useMemo(
+    () => formatMonthLabel(snapshot?.meta.context_month ?? snapshot?.meta.month),
+    [snapshot?.meta.context_month, snapshot?.meta.month],
+  );
+  const usesPreExpiryContext =
+    snapshot?.meta.series_mode === "pre_expiry_context" &&
+    !!snapshot?.meta.context_month &&
+    snapshot.meta.context_month !== snapshot.meta.month;
+  const usesExpireDayProxy = snapshot?.meta.series_mode === "expire_day_proxy";
 
   useEffect(() => {
     if (!pulseData.length) {
@@ -142,7 +153,9 @@ function DescriptivePulsePanel({ onReplayFrameChange, snapshot }: DescriptivePul
     <ChartCard
       title="Nhịp vận hành bên trong tháng"
       subtitle={
-        replayRunning
+        usesPreExpiryContext
+          ? `${contextMonthLabel} là bối cảnh vận hành dùng để ra quyết định cho cohort sắp hết hạn của ${targetMonthLabel}.`
+          : replayRunning
           ? "Mỗi 0,5 giây hệ thống chuyển sang ngày kế tiếp để mô phỏng cách số liệu vận động trong tháng."
           : "Đọc doanh thu theo ngày cùng với số khách nguy cơ cao để thấy nhịp biến động thực tế."
       }
@@ -158,9 +171,11 @@ function DescriptivePulsePanel({ onReplayFrameChange, snapshot }: DescriptivePul
                 {currentReplayDateLabel ?? "Chưa có điểm ngày"}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-600">
-                {snapshot?.meta.series_mode === "expire_day_proxy"
-                  ? "Phần mô phỏng được tách riêng để trình diễn mượt hơn, còn chuỗi ngày vẫn lấy từ bộ dữ liệu tháng đang xem."
-                  : "Chuỗi theo ngày đang phản ánh nhịp thay đổi bên trong tháng được chọn."}
+                {usesPreExpiryContext
+                  ? `Chuỗi này chạy theo ${contextMonthLabel}, là tháng liền trước ${targetMonthLabel}.`
+                  : usesExpireDayProxy
+                    ? "Chuỗi ngày hiện được dựng từ proxy expire_day bên trong tháng mục tiêu."
+                    : "Chuỗi theo ngày đang phản ánh nhịp thay đổi bên trong tháng được chọn."}
               </p>
             </div>
             {replayRunning ? (

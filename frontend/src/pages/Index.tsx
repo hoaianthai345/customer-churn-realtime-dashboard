@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import DescriptiveTab from "@/components/dashboard/DescriptiveTab";
+import DescriptivePulsePanel from "@/components/dashboard/DescriptivePulsePanel";
 import KPICard from "@/components/dashboard/KPICard";
 import PredictiveTab from "@/components/dashboard/PredictiveTab";
 import PrescriptiveTab from "@/components/dashboard/PrescriptiveTab";
@@ -63,6 +64,14 @@ export default function Index() {
   const currentDescriptivePulseDateLabel =
     descriptiveReplayFrame.dateLabel ??
     (latestDescriptivePulse ? formatPulseDateLabel(latestDescriptivePulse.event_date) : null);
+  const descriptiveContextMonthLabel = useMemo(
+    () => formatMonthLabel(dashboard.snapshot?.meta.context_month ?? dashboard.snapshot?.meta.month),
+    [dashboard.snapshot?.meta.context_month, dashboard.snapshot?.meta.month],
+  );
+  const descriptiveUsesPreExpiryContext =
+    dashboard.snapshot?.meta.series_mode === "pre_expiry_context" &&
+    !!dashboard.snapshot?.meta.context_month &&
+    dashboard.snapshot.meta.context_month !== dashboard.snapshot.meta.month;
 
   useEffect(() => {
     setDescriptiveReplayFrame({
@@ -102,7 +111,9 @@ export default function Index() {
         label: "Khách cần giữ ngay",
         value: currentDescriptivePulse ? formatNumber(Number(currentDescriptivePulse.high_risk_users ?? 0)) : "-",
         note: currentDescriptivePulseDateLabel
-          ? `${currentDescriptivePulseDateLabel} • cập nhật theo nhịp trong tháng`
+          ? descriptiveUsesPreExpiryContext
+            ? `${currentDescriptivePulseDateLabel} • bối cảnh ${descriptiveContextMonthLabel} cho cohort ${formatMonthLabel(dashboard.snapshot?.meta.month)}`
+            : `${currentDescriptivePulseDateLabel} • cập nhật theo nhịp trong tháng`
           : "Đang chờ chuỗi dữ liệu nguy cơ",
       },
       {
@@ -121,6 +132,8 @@ export default function Index() {
     [
       currentDescriptivePulse,
       currentDescriptivePulseDateLabel,
+      descriptiveContextMonthLabel,
+      descriptiveUsesPreExpiryContext,
       dashboard.snapshot,
       dashboard.tab2Data,
       dashboard.tab3Data,
@@ -196,6 +209,7 @@ export default function Index() {
           subtitle: "Ước tính cho 30 ngày tới của nhóm khách đang chấm điểm",
           change: dashboard.tab2Data?.kpis.forecasted_churn_delta_pp_vs_prev_month,
           changeLabel: dashboard.tab2Data?.meta.previous_month ? formatMonthLabel(dashboard.tab2Data.meta.previous_month) : undefined,
+          changeSuffix: " điểm %",
           icon: BrainCircuit,
           variant: "danger",
         },
@@ -244,6 +258,7 @@ export default function Index() {
         subtitle: "Sau khi áp dụng phương án đang chọn",
         change: churnDelta,
         changeLabel: "mức gốc",
+        changeSuffix: " điểm %",
         icon: Wand2,
         variant: churnDelta != null && churnDelta <= 0 ? "success" : "danger",
       },
@@ -301,7 +316,7 @@ export default function Index() {
           ? formatCurrency(dashboard.tab3Data.kpis.net_value_after_cost ?? 0)
           : "-",
       note: dashboard.tab3Data?.monte_carlo?.enabled
-        ? "Khả năng phương án này tốt hơn mức hiện tại"
+        ? ""
         : "Ước tính nhanh khi chưa dùng mô phỏng nhiều lần",
     };
   }, [activeTab, dashboard.currentFilterLabel, dashboard.tab1Dimension, dashboard.tab2Data, dashboard.tab3Data]);
@@ -430,6 +445,7 @@ export default function Index() {
           isRefreshing={isRefreshing}
           demoMode={dashboard.demoMode}
           dataModeLabel={dashboard.dataModeLabel}
+          lastUpdatedCaption={dashboard.lastUpdatedCaption}
           lastUpdatedLabel={dashboard.lastUpdatedLabel}
           currentFilterLabel={dashboard.currentFilterLabel}
           replayStatus={dashboard.replayStatus}
@@ -472,41 +488,47 @@ export default function Index() {
           </aside>
 
           <main className="space-y-5">
-            <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
-              <div className="rounded-[30px] border border-white/70 bg-white/88 p-5 shadow-[0_20px_48px_-34px_rgba(15,23,42,0.34)] backdrop-blur">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">{activeCopy.kicker}</p>
-                <h2 className="mt-3 font-display text-[2rem] font-semibold tracking-[-0.05em] text-slate-950">{activeCopy.title}</h2>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">{activeCopy.description}</p>
-                <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {heroCards.map((card) => (
-                    <OverviewCard key={card.label} label={card.label} value={card.value} note={card.note} />
+            {activeTab === "descriptive" ? (
+              <DescriptivePulsePanel onReplayFrameChange={handleDescriptiveReplayFrameChange} snapshot={dashboard.snapshot} />
+            ) : (
+              <>
+                <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="rounded-[30px] border border-white/70 bg-white/88 p-5 shadow-[0_20px_48px_-34px_rgba(15,23,42,0.34)] backdrop-blur">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">{activeCopy.kicker}</p>
+                    <h2 className="mt-3 font-display text-[2rem] font-semibold tracking-[-0.05em] text-slate-950">{activeCopy.title}</h2>
+                    <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">{activeCopy.description}</p>
+                    <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      {heroCards.map((card) => (
+                        <OverviewCard key={card.label} label={card.label} value={card.value} note={card.note} />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[30px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(236,254,255,0.9))] p-5 shadow-[0_20px_48px_-34px_rgba(8,145,178,0.28)]">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">Trọng tâm hiện tại</p>
+                    <h3 className="mt-3 font-display text-xl font-semibold tracking-[-0.05em] text-slate-950">{focusCard.title}</h3>
+                    <p className="mt-5 font-display text-[2.3rem] font-semibold tracking-[-0.07em] text-slate-950">{focusCard.value}</p>
+                    <p className="mt-3 text-sm leading-7 text-slate-600">{focusCard.note}</p>
+                  </div>
+                </section>
+
+                <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+                  {metricCards.map((card) => (
+                    <KPICard
+                      key={card.title}
+                      title={card.title}
+                      value={card.value}
+                      subtitle={card.subtitle}
+                      change={card.change}
+                      changeLabel={card.changeLabel}
+                      icon={card.icon}
+                      variant={card.variant}
+                      footer={card.footer}
+                    />
                   ))}
-                </div>
-              </div>
-
-              <div className="rounded-[30px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(236,254,255,0.9))] p-5 shadow-[0_20px_48px_-34px_rgba(8,145,178,0.28)]">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">Trọng tâm hiện tại</p>
-                <h3 className="mt-3 font-display text-xl font-semibold tracking-[-0.05em] text-slate-950">{focusCard.title}</h3>
-                <p className="mt-5 font-display text-[2.3rem] font-semibold tracking-[-0.07em] text-slate-950">{focusCard.value}</p>
-                <p className="mt-3 text-sm leading-7 text-slate-600">{focusCard.note}</p>
-              </div>
-            </section>
-
-            <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-              {metricCards.map((card) => (
-                <KPICard
-                  key={card.title}
-                  title={card.title}
-                  value={card.value}
-                  subtitle={card.subtitle}
-                  change={card.change}
-                  changeLabel={card.changeLabel}
-                  icon={card.icon}
-                  variant={card.variant}
-                  footer={card.footer}
-                />
-              ))}
-            </section>
+                </section>
+              </>
+            )}
 
             {activeTab === "descriptive" ? (
               <DescriptiveTab
@@ -514,6 +536,7 @@ export default function Index() {
                 snapshot={dashboard.snapshot}
                 loading={dashboard.tab1Loading}
                 onReplayFrameChange={handleDescriptiveReplayFrameChange}
+                hidePulsePanel
                 error={dashboard.tab1Error}
                 selectedMonth={dashboard.selectedMonth}
                 dimension={dashboard.tab1Dimension}

@@ -103,10 +103,9 @@ export default function PrescriptiveTab({
     [...(data?.sensitivity_roi ?? [])].sort(
       (a, b) => Number(b.revenue_impact_per_1pct) - Number(a.revenue_impact_per_1pct),
     )[0] ?? null;
-  const churnImprovement = Math.max(
-    Number(data?.kpis.baseline_churn_prob_pct ?? 0) - Number(data?.kpis.scenario_churn_prob_pct ?? 0),
-    0,
-  );
+  const churnDeltaPp =
+    Number(data?.kpis.scenario_churn_prob_pct ?? 0) - Number(data?.kpis.baseline_churn_prob_pct ?? 0);
+  const churnDeltaAbsPp = Math.abs(churnDeltaPp);
   const contentTransitionClass = switchingPreset
     ? "transition-all duration-300 opacity-60"
     : "transition-all duration-300 opacity-100";
@@ -448,9 +447,24 @@ export default function PrescriptiveTab({
           title="Phương án thay đổi điều gì?"
           description={
             <>
-              Tỷ lệ rời bỏ giảm từ <strong>{formatPct(data.kpis.baseline_churn_prob_pct)}</strong> xuống còn{" "}
-              <strong>{formatPct(data.kpis.scenario_churn_prob_pct)}</strong>, tức cải thiện khoảng{" "}
-              <strong>{formatPct(churnImprovement)}</strong>.
+              Tỷ lệ rời bỏ{" "}
+              {churnDeltaPp < 0 ? (
+                <>
+                  giảm từ <strong>{formatPct(data.kpis.baseline_churn_prob_pct)}</strong> xuống{" "}
+                  <strong>{formatPct(data.kpis.scenario_churn_prob_pct)}</strong>, tức cải thiện khoảng{" "}
+                  <strong>{churnDeltaAbsPp.toFixed(1)} điểm %</strong>.
+                </>
+              ) : churnDeltaPp > 0 ? (
+                <>
+                  tăng từ <strong>{formatPct(data.kpis.baseline_churn_prob_pct)}</strong> lên{" "}
+                  <strong>{formatPct(data.kpis.scenario_churn_prob_pct)}</strong>, tức xấu đi khoảng{" "}
+                  <strong>{churnDeltaAbsPp.toFixed(1)} điểm %</strong>.
+                </>
+              ) : (
+                <>
+                  giữ nguyên ở <strong>{formatPct(data.kpis.scenario_churn_prob_pct)}</strong>.
+                </>
+              )}
             </>
           }
         />

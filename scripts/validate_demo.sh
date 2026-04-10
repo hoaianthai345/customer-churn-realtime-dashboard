@@ -15,6 +15,7 @@ CURL_MAX_TIME="${DEMO_CURL_MAX_TIME:-180}"
 required_paths=(
   "data/artifacts/feature_store"
   "data/artifacts_tab1_descriptive"
+  "data/artifacts_tab1_preexpiry_pulse"
   "data/artifacts_tab2_predictive"
   "data/artifacts_tab3_prescriptive"
   "data/artifacts_tab3_monte_carlo"
@@ -58,6 +59,18 @@ echo "Checking API endpoints..."
 check_contains "API health" "${API_BASE_URL}/health" "\"status\":\"ok\""
 check_contains "Month options" "${API_BASE_URL}/api/v1/month-options" "\"${DEMO_MONTH}\""
 check_contains "Replay status" "${API_BASE_URL}/api/v1/replay/status" "\"status\""
+check_contains "Dashboard snapshot month" "${API_BASE_URL}/api/v1/dashboard/snapshot?year=${DEMO_YEAR}&month=${DEMO_MONTH_NUM}" "\"month\":\"${DEMO_MONTH}\""
+check_contains "Dashboard snapshot series mode" "${API_BASE_URL}/api/v1/dashboard/snapshot?year=${DEMO_YEAR}&month=${DEMO_MONTH_NUM}" "\"series_mode\":\"pre_expiry_context\""
+if [[ "${DEMO_MONTH}" =~ ^([0-9]{4})-([0-9]{2})$ ]]; then
+  demo_year="${BASH_REMATCH[1]}"
+  demo_month_num="${BASH_REMATCH[2]}"
+  if [[ "${demo_month_num}" == "01" ]]; then
+    expected_context_month="$((demo_year - 1))-12"
+  else
+    expected_context_month="$(printf "%04d-%02d" "${demo_year}" "$((10#${demo_month_num} - 1))")"
+  fi
+  check_contains "Dashboard snapshot context month" "${API_BASE_URL}/api/v1/dashboard/snapshot?year=${DEMO_YEAR}&month=${DEMO_MONTH_NUM}" "\"context_month\":\"${expected_context_month}\""
+fi
 
 echo
 echo "Checking frontend..."

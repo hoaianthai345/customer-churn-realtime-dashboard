@@ -8,6 +8,7 @@ interface KPICardProps {
   subtitle?: string;
   change?: number;
   changeLabel?: string;
+  changeSuffix?: string;
   icon: LucideIcon;
   variant?: "default" | "danger" | "success" | "warning" | "accent";
   footer?: ReactNode;
@@ -36,6 +37,7 @@ export default function KPICard({
   subtitle,
   change,
   changeLabel,
+  changeSuffix = "%",
   icon: Icon,
   variant = "default",
   footer,
@@ -76,7 +78,10 @@ export default function KPICard({
       {change !== undefined && (
         <div className={cn("mt-4 flex items-center gap-1.5 text-xs font-medium", trendColor)}>
           <TrendIcon className="h-3.5 w-3.5" />
-          <span>{Math.abs(change).toFixed(1)}%</span>
+          <span>
+            {Math.abs(change).toFixed(1)}
+            {changeSuffix}
+          </span>
           {changeLabel ? <span className="font-normal text-muted-foreground">so với {changeLabel}</span> : null}
         </div>
       )}

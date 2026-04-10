@@ -70,7 +70,28 @@ Nên có thêm:
 
 ## 2. Dataset tùy chọn
 
-### Dataset C. Tab 3 prescriptive artifacts
+### Dataset C. Raw KKBOX competition data
+
+Notebook nao can:
+
+- `tab1/kkbox-preexpiry-pulse-context.ipynb`
+
+Can khi:
+
+- muon dung pulse theo ngay cua thang truoc `target_month`
+- muon trinh bay dung boi canh van hanh de support du bao / simulation cho thang muc tieu
+
+Du lieu toi thieu:
+
+- `transactions_v2.csv` hoac `transactions_v2.csv.7z`
+- `user_logs_v2.csv` hoac `user_logs_v2.csv.7z`
+
+Co the dung:
+
+- input competition goc cua Kaggle: `/kaggle/input/competitions/kkbox-churn-prediction-challenge`
+- hoac attach mot dataset raw rieng va sua `RAW_DATA_ROOT_HINT`
+
+### Dataset D. Tab 3 prescriptive artifacts
 
 Dùng khi:
 
@@ -81,7 +102,7 @@ Tên dataset khuyến nghị:
 
 - `kkbox-tab3-prescriptive`
 
-### Dataset D. Tab 3 Monte Carlo artifacts
+### Dataset E. Tab 3 Monte Carlo artifacts
 
 Dùng khi:
 

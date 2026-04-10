@@ -25,6 +25,7 @@ from .artifact_backend import (
     build_tab1_descriptive_payload,
     build_tab2_predictive_payload,
     build_tab3_prescriptive_payload,
+    load_tab1_preexpiry_pulse_payload,
 )
 
 
@@ -1222,6 +1223,19 @@ class DashboardSnapshot:
     activity_series: List[Dict[str, Any]]
 
 
+def _apply_preexpiry_context(snapshot: DashboardSnapshot, month_start: date) -> DashboardSnapshot:
+    target_month = month_start.year * 100 + month_start.month
+    pulse_payload = load_tab1_preexpiry_pulse_payload(target_month)
+    if pulse_payload is None:
+        return snapshot
+
+    snapshot.meta.update(pulse_payload.get("meta") or {})
+    snapshot.revenue_series = pulse_payload.get("revenue_series", [])
+    snapshot.risk_series = pulse_payload.get("risk_series", [])
+    snapshot.activity_series = pulse_payload.get("activity_series", [])
+    return snapshot
+
+
 def _build_snapshot(year: Optional[int], month: Optional[int]) -> DashboardSnapshot:
     month_start, next_month = _month_bounds(year, month)
     start_iso = _date_to_iso(month_start)
@@ -1354,7 +1368,7 @@ def _build_snapshot(year: Optional[int], month: Optional[int]) -> DashboardSnaps
         if isinstance(point["event_date"], date):
             point["event_date"] = point["event_date"].isoformat()
 
-    return DashboardSnapshot(
+    snapshot = DashboardSnapshot(
         meta={
             "month": month_start.strftime("%Y-%m"),
             "month_start": month_start.isoformat(),
@@ -1366,6 +1380,7 @@ def _build_snapshot(year: Optional[int], month: Optional[int]) -> DashboardSnaps
         risk_series=risk_series,
         activity_series=activity_series,
     )
+    return _apply_preexpiry_context(snapshot, month_start)
 
 
 app = FastAPI(title="Realtime BI API", version="0.1.0")

@@ -8,6 +8,7 @@ services:
     environment:
       FEATURE_STORE_DIR: /opt/project/data/artifacts/feature_store
       TAB1_ARTIFACTS_DIR: /opt/project/data/artifacts_tab1_descriptive
+      TAB1_PREEXPIRY_PULSE_DIR: /opt/project/data/artifacts_tab1_preexpiry_pulse
       TAB2_ARTIFACTS_DIR: /opt/project/data/artifacts_tab2_predictive
       TAB3_ARTIFACTS_DIR: /opt/project/data/artifacts_tab3_prescriptive
       TAB3_MONTE_CARLO_ARTIFACTS_DIR: /opt/project/data/artifacts_tab3_monte_carlo

@@ -16,9 +16,14 @@ export type SnapshotPayload = {
     month_start: string;
     month_end_exclusive: string;
     as_of: string;
+    context_month?: string;
+    context_month_start?: string;
+    context_month_end_exclusive?: string;
     artifact_mode?: string;
     series_mode?: string;
     artifact_dir?: string | null;
+    pulse_artifact_dir?: string | null;
+    pulse_as_of?: string | null;
   };
   metrics: MetricPayload;
   revenue_series: SeriesPoint[];
@@ -206,6 +211,7 @@ export type PredictiveExecutiveMatrixBubble = {
   user_count: number;
   revenue_at_risk: number;
   display_size: number;
+  priority_quadrant?: string;
 };
 
 export type RevenueLeakageRow = {

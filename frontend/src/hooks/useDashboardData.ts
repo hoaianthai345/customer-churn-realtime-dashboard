@@ -7,9 +7,11 @@ import {
   DEFAULT_SCENARIO_INPUTS,
   DEMO_MODE,
   SEGMENT_LABELS,
+  buildSnapshotPulse,
   appendModelParams,
   appendSegmentFilter,
   formatMonthLabel,
+  formatPulseDateLabel,
   formatTimestamp,
   hasTab1Data,
   hasTab2Data,
@@ -84,14 +86,28 @@ export function useDashboardData(activeTab: TabId) {
   const tab1HasData = useMemo(() => hasTab1Data(tab1Data), [tab1Data]);
   const tab2HasData = useMemo(() => hasTab2Data(tab2Data), [tab2Data]);
   const tab3HasData = useMemo(() => hasTab3Data(tab3Data), [tab3Data]);
+  const snapshotPulse = useMemo(() => buildSnapshotPulse(snapshot), [snapshot]);
+  const snapshotPulseLastDateLabel = useMemo(() => {
+    const lastPoint = snapshotPulse[snapshotPulse.length - 1] ?? null;
+    return lastPoint ? formatPulseDateLabel(lastPoint.event_date) : null;
+  }, [snapshotPulse]);
   const currentFilterLabel = useMemo(() => {
     if (!segmentFilter.segmentType || !segmentFilter.segmentValue) return "Toàn bộ khách hàng";
     return `${SEGMENT_LABELS[segmentFilter.segmentType]}: ${segmentFilter.segmentValue}`;
   }, [segmentFilter.segmentType, segmentFilter.segmentValue]);
   const dataModeLabel = DEMO_MODE ? "Ảnh chụp theo kỳ" : wsStatus === "open" ? "Trực tuyến" : "Đồng bộ định kỳ";
+  const lastUpdatedCaption =
+    (snapshot?.meta.series_mode === "pre_expiry_context" || snapshot?.meta.series_mode === "expire_day_proxy") &&
+    snapshotPulseLastDateLabel
+      ? "Dữ liệu hiển thị đến"
+      : "Cập nhật gần nhất";
   const lastUpdatedLabel = useMemo(
-    () => formatTimestamp(snapshot?.meta.as_of ?? lastPolledAt),
-    [lastPolledAt, snapshot?.meta.as_of],
+    () =>
+      (snapshot?.meta.series_mode === "pre_expiry_context" || snapshot?.meta.series_mode === "expire_day_proxy") &&
+      snapshotPulseLastDateLabel
+        ? snapshotPulseLastDateLabel
+        : formatTimestamp(snapshot?.meta.as_of ?? lastPolledAt),
+    [lastPolledAt, snapshot?.meta.as_of, snapshot?.meta.series_mode, snapshotPulseLastDateLabel],
   );
   const replayBusy = replayStatus?.status === "queued" || replayStatus?.status === "running";
   const replayProgressPct = Math.round((replayStatus?.progress ?? 0) * 100);
@@ -438,6 +454,7 @@ export function useDashboardData(activeTab: TabId) {
     replayStatus,
     refreshVersion,
     lastPolledAt,
+    lastUpdatedCaption,
     lastUpdatedLabel,
     dataModeLabel,
     replayBusy,

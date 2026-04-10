@@ -141,6 +141,22 @@ TAB1_SNAPSHOT_DAILY_COLUMNS = (
     "active_segment",
 )
 
+TAB1_PREEXPIRY_PULSE_DAILY_COLUMNS = (
+    "event_date",
+    "total_revenue",
+    "total_transactions",
+    "high_risk_users",
+    "avg_risk_score",
+    "active_users",
+    "total_listening_secs",
+    "target_month",
+    "target_month_label",
+    "context_month",
+    "context_month_label",
+    "cohort_size",
+    "series_mode",
+)
+
 FEATURE_SNAPSHOT_COLUMNS = (
     "msno",
     "target_month",
@@ -287,6 +303,24 @@ def resolve_tab1_artifacts_dir(root_hint: str | Path | None = None, score_month:
             ("artifacts", "tab1_descriptive"),
             ("artifacts_tab1_descriptive",),
             ("data", "artifacts", "_smoke_test", "tab1"),
+        ],
+    )
+
+
+def resolve_tab1_preexpiry_pulse_dir(root_hint: str | Path | None = None, score_month: int = 201704) -> Path:
+    return _resolve_dir(
+        env_var="TAB1_PREEXPIRY_PULSE_DIR",
+        root_hint=root_hint,
+        required_files=(
+            f"tab1_preexpiry_pulse_daily_{score_month}.parquet",
+            f"tab1_preexpiry_pulse_summary_{score_month}.json",
+            "manifest.json",
+        ),
+        local_candidates=[
+            ("data", "artifacts_tab1_preexpiry_pulse"),
+            ("data", "artifacts", "tab1_preexpiry_pulse"),
+            ("artifacts", "tab1_preexpiry_pulse"),
+            ("artifacts_tab1_preexpiry_pulse",),
         ],
     )
 
@@ -578,6 +612,17 @@ def yyyymm_to_label(target_month: int) -> str:
     return f"{text[:4]}-{text[4:6]}"
 
 
+def yyyymm_to_month_start(target_month: int) -> date:
+    text = str(int(target_month)).zfill(6)
+    return date(int(text[:4]), int(text[4:6]), 1)
+
+
+def next_month_start(month_start: date) -> date:
+    if month_start.month == 12:
+        return date(month_start.year + 1, 1, 1)
+    return date(month_start.year, month_start.month + 1, 1)
+
+
 def _cache_token(value: Any) -> str:
     if value is None:
         return "none"
@@ -622,6 +667,104 @@ def _tab2_payload_cache_path(
 
 def _snapshot_payload_cache_path(artifact_dir: Path, *, target_month: int) -> Path:
     return _payload_cache_dir(artifact_dir) / f"dashboard_snapshot_{target_month}.json"
+
+
+def _load_tab1_preexpiry_pulse_daily_df(pulse_dir: Path, target_month: int) -> pd.DataFrame:
+    path = pulse_dir / f"tab1_preexpiry_pulse_daily_{target_month}.parquet"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab1 preexpiry pulse daily cho thang {target_month} trong {pulse_dir}")
+    df = read_parquet_copy(path, columns=TAB1_PREEXPIRY_PULSE_DAILY_COLUMNS)
+    if "target_month" in df.columns:
+        scoped = pd.to_numeric(df["target_month"], errors="coerce").astype("Int64")
+        df = df.assign(target_month=scoped)
+        df = df.loc[df["target_month"] == target_month].copy()
+    return df.reset_index(drop=True)
+
+
+def _load_tab1_preexpiry_pulse_summary(pulse_dir: Path, target_month: int) -> dict[str, Any]:
+    path = pulse_dir / f"tab1_preexpiry_pulse_summary_{target_month}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Khong tim thay tab1 preexpiry pulse summary cho thang {target_month} trong {pulse_dir}")
+    return read_json_copy(path)
+
+
+def load_tab1_preexpiry_pulse_payload(
+    target_month: int,
+    *,
+    root_hint: str | Path | None = None,
+) -> dict[str, Any] | None:
+    try:
+        pulse_dir = resolve_tab1_preexpiry_pulse_dir(root_hint=root_hint, score_month=target_month)
+    except FileNotFoundError:
+        return None
+
+    daily_df = _load_tab1_preexpiry_pulse_daily_df(pulse_dir, target_month)
+    if daily_df.empty:
+        return None
+    summary = _load_tab1_preexpiry_pulse_summary(pulse_dir, target_month)
+
+    daily = daily_df.copy()
+    daily["event_date"] = pd.to_datetime(daily["event_date"], errors="coerce")
+    daily = daily.dropna(subset=["event_date"]).sort_values("event_date").reset_index(drop=True)
+    if daily.empty:
+        return None
+
+    for column in (
+        "total_revenue",
+        "total_transactions",
+        "high_risk_users",
+        "avg_risk_score",
+        "active_users",
+        "total_listening_secs",
+    ):
+        daily[column] = pd.to_numeric(daily[column], errors="coerce").fillna(0.0)
+
+    for column in ("total_transactions", "high_risk_users", "active_users"):
+        daily[column] = daily[column].round().astype(int)
+    daily["event_date"] = daily["event_date"].dt.date.astype(str)
+
+    context_month_value = summary.get("context_month")
+    if context_month_value is None and "context_month" in daily.columns and daily["context_month"].notna().any():
+        context_month_value = int(pd.to_numeric(daily["context_month"], errors="coerce").dropna().iloc[0])
+    context_month = int(context_month_value) if context_month_value is not None else previous_yyyymm(target_month)
+    context_month_start = yyyymm_to_month_start(context_month)
+    context_month_end = next_month_start(context_month_start)
+
+    series_mode = str(summary.get("series_mode") or daily.get("series_mode", pd.Series(["pre_expiry_context"])).iloc[0] or "pre_expiry_context")
+
+    return {
+        "meta": {
+            "series_mode": series_mode,
+            "context_month": str(summary.get("context_month_label") or yyyymm_to_label(context_month)),
+            "context_month_start": context_month_start.isoformat(),
+            "context_month_end_exclusive": context_month_end.isoformat(),
+            "pulse_artifact_dir": str(pulse_dir),
+            "pulse_as_of": summary.get("generated_at_utc"),
+        },
+        "revenue_series": daily.loc[:, ["event_date", "total_revenue", "total_transactions"]].to_dict(orient="records"),
+        "risk_series": daily.loc[:, ["event_date", "high_risk_users", "avg_risk_score"]].to_dict(orient="records"),
+        "activity_series": daily.loc[:, ["event_date", "active_users", "total_listening_secs"]].to_dict(orient="records"),
+    }
+
+
+def overlay_tab1_preexpiry_pulse(
+    snapshot_payload: dict[str, Any],
+    *,
+    target_month: int,
+    root_hint: str | Path | None = None,
+) -> dict[str, Any]:
+    pulse_payload = load_tab1_preexpiry_pulse_payload(target_month, root_hint=root_hint)
+    if pulse_payload is None:
+        return snapshot_payload
+
+    payload = deepcopy(snapshot_payload)
+    meta = dict(payload.get("meta") or {})
+    meta.update(pulse_payload.get("meta") or {})
+    payload["meta"] = meta
+    payload["revenue_series"] = pulse_payload.get("revenue_series", [])
+    payload["risk_series"] = pulse_payload.get("risk_series", [])
+    payload["activity_series"] = pulse_payload.get("activity_series", [])
+    return payload
 
 
 def available_tab2_months(root_hint: str | Path | None = None) -> list[str]:
@@ -1092,6 +1235,16 @@ def _normalize_tab2_executive_value_risk_matrix(df: pd.DataFrame, target_month: 
         work["risk_tier"] = _to_executive_risk_band(work["risk_band"])
     if "display_size" not in work.columns:
         work["display_size"] = np.sqrt(work["user_count"].clip(lower=1)).astype("float64")
+    if "priority_quadrant" not in work.columns:
+        work["priority_quadrant"] = np.select(
+            [
+                (work["prob_bin"] >= 0.5) & (work["expected_renewal_amount"] >= 100.0),
+                (work["prob_bin"] >= 0.5) & (work["expected_renewal_amount"] < 100.0),
+                (work["prob_bin"] < 0.5) & (work["expected_renewal_amount"] >= 100.0),
+            ],
+            ["VIP Rescue", "Price Sensitive", "Core Loyal"],
+            default="Casual",
+        )
 
     return (
         work[
@@ -1103,6 +1256,7 @@ def _normalize_tab2_executive_value_risk_matrix(df: pd.DataFrame, target_month: 
                 "user_count",
                 "revenue_at_risk",
                 "display_size",
+                "priority_quadrant",
             ]
         ]
         .sort_values(["prob_bin", "expected_renewal_amount", "user_count"], ascending=[True, True, False])
@@ -1564,7 +1718,11 @@ def build_dashboard_snapshot_payload(
     if prefer_cache:
         cache_path = _snapshot_payload_cache_path(tab1_dir, target_month=target_month)
         if cache_path.exists():
-            return read_json_copy(cache_path)
+            return overlay_tab1_preexpiry_pulse(
+                read_json_copy(cache_path),
+                target_month=target_month,
+                root_hint=root_hint,
+            )
     snapshot_df = _load_tab1_snapshot_df(tab1_dir, target_month, columns=TAB1_SNAPSHOT_DAILY_COLUMNS)
     monthly = _load_tab1_monthly_kpis(tab1_dir)
     monthly = monthly[monthly["target_month"] == target_month]
@@ -1605,7 +1763,7 @@ def build_dashboard_snapshot_payload(
     else:
         next_month = month_start.replace(month=month_start.month + 1)
 
-    return {
+    payload = {
         "meta": {
             "month": yyyymm_to_label(target_month),
             "month_start": month_start.isoformat(),
@@ -1620,6 +1778,7 @@ def build_dashboard_snapshot_payload(
         "risk_series": risk_series,
         "activity_series": activity_series,
     }
+    return overlay_tab1_preexpiry_pulse(payload, target_month=target_month, root_hint=root_hint)
 
 
 def _load_tab2_scored_df(
@@ -2132,6 +2291,15 @@ def _build_executive_value_risk_matrix(df: pd.DataFrame) -> list[dict[str, Any]]
     )
     grouped["risk_tier"] = _to_executive_risk_band(grouped["risk_band"])
     grouped["display_size"] = np.sqrt(grouped["user_count"].clip(lower=1)).astype("float64")
+    grouped["priority_quadrant"] = np.select(
+        [
+            (grouped["prob_bin"] >= 0.5) & (grouped["expected_renewal_amount"] >= 100.0),
+            (grouped["prob_bin"] >= 0.5) & (grouped["expected_renewal_amount"] < 100.0),
+            (grouped["prob_bin"] < 0.5) & (grouped["expected_renewal_amount"] >= 100.0),
+        ],
+        ["VIP Rescue", "Price Sensitive", "Core Loyal"],
+        default="Casual",
+    )
     return grouped.to_dict(orient="records")
 
 

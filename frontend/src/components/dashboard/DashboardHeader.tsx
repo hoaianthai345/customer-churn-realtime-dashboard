@@ -12,6 +12,7 @@ type DashboardHeaderProps = {
   isRefreshing?: boolean;
   demoMode: boolean;
   dataModeLabel: string;
+  lastUpdatedCaption: string;
   lastUpdatedLabel: string;
   currentFilterLabel: string;
   replayStatus: ReplayStatus | null;
@@ -57,6 +58,7 @@ export default function DashboardHeader({
   isRefreshing,
   demoMode,
   dataModeLabel,
+  lastUpdatedCaption,
   lastUpdatedLabel,
   currentFilterLabel,
   replayStatus,
@@ -100,7 +102,7 @@ export default function DashboardHeader({
                   <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${toneClass}`}>{dataModeLabel}</span>
                   <span className="text-xs text-slate-500">Cập nhật theo nguồn dữ liệu hiện hành</span>
                 </div>
-                <p className="mt-3 text-sm text-slate-600">Cập nhật gần nhất: {lastUpdatedLabel}</p>
+                <p className="mt-3 text-sm text-slate-600">{lastUpdatedCaption}: {lastUpdatedLabel}</p>
               </div>
 
               <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4">
