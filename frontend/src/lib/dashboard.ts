@@ -139,6 +139,8 @@ export type Tab1Payload = {
     dimension: string;
     trend_scope?: "overall" | "filtered";
     previous_month?: string | null;
+    churn_breakdown_month?: string | null;
+    risk_heatmap_month?: string | null;
     segment_filter: {
       segment_type: SegmentType | null;
       segment_value: string | null;

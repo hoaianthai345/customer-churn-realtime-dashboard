@@ -1,5 +1,4 @@
 import { Fragment, memo, useMemo } from "react";
-import { Filter, Orbit, Sparkles, Waves, type LucideIcon } from "lucide-react";
 import {
   Area,
   Bar,
@@ -22,15 +21,11 @@ import {
   YAxis,
   ZAxis,
 } from "recharts";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ChartCard from "@/components/dashboard/ChartCard";
 import DescriptivePulsePanel from "@/components/dashboard/DescriptivePulsePanel";
 import InsightCard from "@/components/dashboard/InsightCard";
 import StatePanel from "@/components/dashboard/StatePanel";
 import {
-  DEMO_MODE,
-  DIMENSION_LABELS,
   SEGMENT_LABELS,
   clamp,
   formatCompactCurrency,
@@ -166,11 +161,8 @@ function DescriptiveTab({
   hidePulsePanel = false,
   error,
   selectedMonth,
-  dimension,
-  onDimensionChange,
   segmentFilter,
   onToggleSegmentFilter,
-  onClearFilter,
 }: DescriptiveTabProps) {
   const monthlyTrend = useMemo(
     () => [...(data?.monthly_trend ?? [])].sort((a, b) => a.target_month - b.target_month),
@@ -303,6 +295,16 @@ function DescriptiveTab({
       ].filter((row) => row.value > 0),
     [churnBreakdown.churned_users, churnBreakdown.renewed_users],
   );
+  const churnBreakdownMonthLabel = data?.meta.churn_breakdown_month
+    ? formatMonthLabel(data.meta.churn_breakdown_month)
+    : formatMonthLabel(data?.meta.month ?? selectedMonth);
+  const riskHeatmapMonthLabel = data?.meta.risk_heatmap_month
+    ? formatMonthLabel(data.meta.risk_heatmap_month)
+    : formatMonthLabel(data?.meta.month ?? selectedMonth);
+  const usesPriorChurnBreakdownArtifact =
+    !!data?.meta.churn_breakdown_month && data.meta.churn_breakdown_month !== data.meta.month;
+  const usesPriorRiskHeatmapArtifact =
+    !!data?.meta.risk_heatmap_month && data.meta.risk_heatmap_month !== data.meta.month;
   const churnBandCeiling = useMemo(
     () => Math.max(CHURN_CRITICAL_PCT + 0.8, ...trendSeries.map((point) => Number(point.historical_churn_rate ?? 0) + 0.3)),
     [trendSeries],
@@ -383,89 +385,6 @@ function DescriptiveTab({
 
   return (
     <div className="space-y-5">
-      <section className="rounded-[28px] border border-white/70 bg-white/88 p-5 shadow-[0_18px_40px_-30px_rgba(15,23,42,0.34)] backdrop-blur">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">Tóm tắt điều hành</p>
-            <h3 className="mt-2 font-display text-xl font-semibold tracking-[-0.03em] text-foreground">Điểm cần nhìn ngay</h3>
-          </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white">
-            <Filter className="h-4 w-4" />
-          </div>
-        </div>
-
-        <div className="mt-5 grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)] 2xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Tiêu chí chia nhóm</p>
-            <Select value={dimension} onValueChange={(value) => onDimensionChange(value as Tab1Dimension)}>
-              <SelectTrigger className="h-11 rounded-2xl border-slate-200 bg-slate-50">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(DIMENSION_LABELS) as Tab1Dimension[]).map((entry) => (
-                  <SelectItem key={entry} value={entry}>
-                    {DIMENSION_LABELS[entry]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <div className="mt-4 rounded-[22px] bg-slate-50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Phạm vi đang áp dụng</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">
-                    {selectedFilterLabel
-                      ? selectedFilterLabel
-                      : DEMO_MODE
-                        ? "Bộ lọc này hiện áp dụng cho lớp hiện trạng; các lớp còn lại giữ cùng một phạm vi theo tháng đang chọn."
-                        : "Chọn một nhóm ở phần dưới nếu muốn giữ nguyên phạm vi xem cho cả ba tab."}
-                  </p>
-                </div>
-                {selectedFilterLabel ? (
-                  <Button variant="outline" onClick={onClearFilter} className="rounded-full border-slate-300">
-                    Bỏ lọc
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <ExecutiveSignal
-              icon={Sparkles}
-              title="Rời bỏ mạnh nhất"
-              value={hottestSegment?.segment_value ?? "Chưa rõ"}
-              detail={
-                hottestSegment
-                  ? `${formatPct(Number(hottestSegment.churn_rate_pct), 1)} rời bỏ trên ${formatNumber(hottestSegment.users)} khách`
-                  : "Chưa đủ dữ liệu để xác định nhóm rời bỏ cao nhất"
-              }
-            />
-            <ExecutiveSignal
-              icon={Waves}
-              title="Nhóm đông nhất"
-              value={biggestSegment?.segment_value ?? "Chưa rõ"}
-              detail={
-                biggestSegment
-                  ? `${formatNumber(biggestSegment.users)} khách, cần theo dõi sát vì có ảnh hưởng rộng`
-                  : "Chưa đủ dữ liệu để xác định nhóm có quy mô lớn nhất"
-              }
-            />
-            <ExecutiveSignal
-              icon={Orbit}
-              title="Tín hiệu hành vi xấu"
-              value={riskiestBehavior ? formatCompactCurrency(Number(riskiestBehavior.revenue_at_risk ?? 0)) : "Chưa rõ"}
-              detail={
-                riskiestBehavior
-                  ? `${riskiestBehavior.cluster_label ?? "Cụm hành vi"} • ${formatNumber(riskiestBehavior.users)} khách • ${formatPct(Number(riskiestBehavior.churn_rate_pct), 1)} rời bỏ`
-                  : "Chưa đủ dữ liệu hành vi để xác định vùng chán dịch vụ"
-              }
-            />
-          </div>
-        </div>
-      </section>
-
       {hasMultiMonthTrend ? (
         <>
           <div className="grid gap-5 xl:grid-cols-2 2xl:grid-cols-3">
@@ -646,8 +565,12 @@ function DescriptiveTab({
           title="Churn Rate Donut"
           subtitle={
             selectedFilterLabel
-              ? `Snapshot hiện tại đang bám theo ${selectedFilterLabel}.`
-              : "Cơ cấu giữ lại và rời bỏ của tháng đang xem."
+              ? usesPriorChurnBreakdownArtifact
+                ? `${selectedFilterLabel} • donut đang bám artifact ${churnBreakdownMonthLabel}.`
+                : `Snapshot hiện tại đang bám theo ${selectedFilterLabel}.`
+              : usesPriorChurnBreakdownArtifact
+                ? `Cơ cấu giữ lại và rời bỏ đang bám artifact ${churnBreakdownMonthLabel}.`
+                : "Cơ cấu giữ lại và rời bỏ của tháng đang xem."
           }
           className="min-h-[300px]"
         >
@@ -682,7 +605,11 @@ function DescriptiveTab({
 
         <ChartCard
           title="Value Tier × Risk Customer Segment"
-          subtitle="Phân khúc khách hàng và khả năng rời bỏ"
+          subtitle={
+            usesPriorRiskHeatmapArtifact
+              ? `Phân khúc khách hàng và khả năng rời bỏ đang bám artifact ${riskHeatmapMonthLabel}.`
+              : "Phân khúc khách hàng và khả năng rời bỏ"
+          }
           className="min-h-[340px]"
         >
           {riskHeatmapRows.length ? (
@@ -880,33 +807,6 @@ function DescriptiveTab({
               )
             }
           />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ExecutiveSignal({
-  icon: Icon,
-  title,
-  value,
-  detail,
-}: {
-  icon: LucideIcon;
-  title: string;
-  value: string;
-  detail: string;
-}) {
-  return (
-    <div className="rounded-[22px] border border-slate-200 bg-white px-4 py-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-white">
-          <Icon className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">{title}</p>
-          <p className="mt-2 font-display text-lg font-semibold tracking-[-0.03em] text-slate-950">{value}</p>
-          <p className="mt-1 text-sm leading-6 text-slate-600">{detail}</p>
         </div>
       </div>
     </div>

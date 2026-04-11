@@ -902,6 +902,68 @@ def _build_tab1_churn_breakdown(total_expiring_users: int, historical_churn_rate
     }
 
 
+def _resolve_tab1_chart_context_month(
+    target_month: int,
+    monthly_trend: Iterable[dict[str, Any]] | None,
+) -> int:
+    available_months: list[int] = []
+    for point in monthly_trend or []:
+        month_value = pd.to_numeric(pd.Series([point.get("target_month")]), errors="coerce").iloc[0]
+        if pd.isna(month_value):
+            continue
+        month_number = int(month_value)
+        if month_number <= target_month:
+            available_months.append(month_number)
+    return max(available_months) if available_months else target_month
+
+
+def _find_tab1_monthly_trend_point(
+    monthly_trend: Iterable[dict[str, Any]] | None,
+    target_month: int,
+) -> dict[str, Any] | None:
+    for point in monthly_trend or []:
+        month_value = pd.to_numeric(pd.Series([point.get("target_month")]), errors="coerce").iloc[0]
+        if pd.isna(month_value):
+            continue
+        if int(month_value) == target_month:
+            return point
+    return None
+
+
+def _apply_tab1_chart_artifact_context(
+    payload: dict[str, Any],
+    *,
+    tab1_dir: Path,
+    target_month: int,
+    segment_type: Optional[str],
+    segment_value: Optional[str],
+) -> dict[str, Any]:
+    meta = payload.setdefault("meta", {})
+    monthly_trend = payload.get("monthly_trend") or []
+
+    chart_context_month = _resolve_tab1_chart_context_month(target_month, monthly_trend)
+    meta["churn_breakdown_month"] = yyyymm_to_label(chart_context_month)
+
+    chart_context_point = _find_tab1_monthly_trend_point(monthly_trend, chart_context_month)
+    if chart_context_point is not None:
+        total_users = int(pd.to_numeric(pd.Series([chart_context_point.get("total_expiring_users")]), errors="coerce").fillna(0).iloc[0])
+        churn_rate_pct = _coerce_rate_pct(chart_context_point.get("historical_churn_rate", 0.0))
+        payload["churn_breakdown"] = _build_tab1_churn_breakdown(total_users, churn_rate_pct)
+
+    risk_heatmap_month = target_month
+    if not segment_type and not segment_value:
+        precomputed_risk_heatmap = _normalize_tab1_precomputed_risk_heatmap(
+            _load_tab1_snapshot_risk_heatmap_df(tab1_dir),
+            chart_context_month,
+        )
+        if precomputed_risk_heatmap:
+            payload["risk_heatmap"] = precomputed_risk_heatmap
+            risk_heatmap_month = chart_context_month
+
+    meta["risk_heatmap_month"] = yyyymm_to_label(risk_heatmap_month)
+    return payload
+
+
 def _tab1_normalized_churn_probability(frame: pd.DataFrame) -> pd.Series:
     if "churn_rate" in frame.columns:
         churn_probability = pd.to_numeric(frame["churn_rate"], errors="coerce").fillna(0.0)
@@ -1518,6 +1580,8 @@ def _empty_tab1_payload(
             "segment_filter": {"segment_type": segment_type, "segment_value": segment_value},
             "trend_scope": "filtered" if segment_type and segment_value else "overall",
             "previous_month": None,
+            "churn_breakdown_month": yyyymm_to_label(target_month),
+            "risk_heatmap_month": yyyymm_to_label(target_month),
             "artifact_mode": "artifact_backed",
             "artifact_dir": str(artifact_dir),
         },
@@ -1564,7 +1628,13 @@ def build_tab1_descriptive_payload(
             segment_value=segment_value,
         )
         if cache_path.exists():
-            return read_json_copy(cache_path)
+            return _apply_tab1_chart_artifact_context(
+                read_json_copy(cache_path),
+                tab1_dir=tab1_dir,
+                target_month=target_month,
+                segment_type=segment_type,
+                segment_value=segment_value,
+            )
     snapshot_df = _load_tab1_snapshot_df(tab1_dir, target_month)
     filtered = _filter_by_segment(snapshot_df, segment_type, segment_value)
     dimension_col = _tab1_dimension_column(dimension)
@@ -1694,7 +1764,8 @@ def build_tab1_descriptive_payload(
     )
     risk_heatmap = precomputed_risk_heatmap or _build_tab1_risk_heatmap(work)
 
-    return {
+    return _apply_tab1_chart_artifact_context(
+        {
         "meta": {
             "month": yyyymm_to_label(target_month),
             "dimension": dimension_col,
@@ -1712,7 +1783,12 @@ def build_tab1_descriptive_payload(
         "km_curve": km_curve,
         "segment_mix": segment_mix,
         "boredom_scatter": behavior_clusters,
-    }
+        },
+        tab1_dir=tab1_dir,
+        target_month=target_month,
+        segment_type=segment_type,
+        segment_value=segment_value,
+    )
 
 
 def build_dashboard_snapshot_payload(

@@ -399,24 +399,22 @@ export default function Index() {
           <main className="space-y-5">
             {activeTab === "descriptive" ? (
               <DescriptivePulsePanel onReplayFrameChange={handleDescriptiveReplayFrameChange} snapshot={dashboard.snapshot} />
-            ) : activeTab === "prescriptive" ? (
-              <>
-                <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-                  {metricCards.map((card) => (
-                    <KPICard
-                      key={card.title}
-                      title={card.title}
-                      value={card.value}
-                      subtitle={card.subtitle}
-                      change={card.change}
-                      changeLabel={card.changeLabel}
-                      icon={card.icon}
-                      variant={card.variant}
-                      footer={card.footer}
-                    />
-                  ))}
-                </section>
-              </>
+            ) : activeTab === "predictive" || activeTab === "prescriptive" ? (
+              <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
+                {metricCards.map((card) => (
+                  <KPICard
+                    key={card.title}
+                    title={card.title}
+                    value={card.value}
+                    subtitle={card.subtitle}
+                    change={card.change}
+                    changeLabel={card.changeLabel}
+                    icon={card.icon}
+                    variant={card.variant}
+                    footer={card.footer}
+                  />
+                ))}
+              </section>
             ) : null}
 
             {activeTab === "descriptive" ? (
