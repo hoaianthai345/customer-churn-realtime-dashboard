@@ -466,27 +466,6 @@ export const DEFAULT_SCENARIO_INPUTS: ScenarioInputs = {
   skip_shift_pct: 25,
 };
 
-export const DASHBOARD_COPY = {
-  descriptive: {
-    kicker: "Lớp 1: Hiện trạng",
-    title: "Bức tranh hiện tại của nhóm khách sắp hết hạn",
-    description:
-      "Giúp nhìn nhanh nhóm khách sắp gia hạn đang khỏe hay yếu ở đâu, nhóm nào có dấu hiệu rời bỏ rõ nhất, và hành vi nào cần chú ý trước khi chuyển sang bước dự báo.",
-  },
-  predictive: {
-    kicker: "Lớp 2: Dự báo",
-    title: "Dự báo khách có nguy cơ rời bỏ và doanh thu dễ mất",
-    description:
-      "Tập trung vào nhóm khách vừa có khả năng rời bỏ cao vừa kéo theo doanh thu lớn, để đội vận hành biết nên giữ ai trước và tổn thất nằm ở đâu.",
-  },
-  prescriptive: {
-    kicker: "Lớp 3: Kịch bản hành động",
-    title: "So sánh các phương án giữ chân trước khi triển khai",
-    description:
-      "Cho phép thử nhiều phương án can thiệp để xem tỷ lệ rời bỏ giảm bao nhiêu, giữ lại được bao nhiêu doanh thu và kịch bản nào đáng làm nhất.",
-  },
-} as const;
-
 export function resolveWsBase(): string {
   const explicitBase = import.meta.env.VITE_WS_BASE_URL;
   if (explicitBase) {

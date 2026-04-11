@@ -20,7 +20,6 @@ import PrescriptiveTab from "@/components/dashboard/PrescriptiveTab";
 import TabNavigation, { type TabId, type TabNavigationItem } from "@/components/dashboard/TabNavigation";
 import { useDashboardData } from "@/hooks/useDashboardData";
 import {
-  DASHBOARD_COPY,
   DIMENSION_LABELS,
   buildSnapshotPulse,
   formatCompactCurrency,
@@ -28,7 +27,6 @@ import {
   formatMonthLabel,
   formatNumber,
   formatPct,
-  formatPulseDateLabel,
   type PulseReplayFrame,
 } from "@/lib/dashboard";
 
@@ -52,7 +50,7 @@ function relativeChange(current: number | null | undefined, previous: number | n
 
 export default function Index() {
   const [activeTab, setActiveTab] = useState<TabId>("descriptive");
-  const [descriptiveReplayFrame, setDescriptiveReplayFrame] = useState<PulseReplayFrame>({
+  const [, setDescriptiveReplayFrame] = useState<PulseReplayFrame>({
     point: null,
     dateLabel: null,
     status: "idle",
@@ -60,18 +58,6 @@ export default function Index() {
   const dashboard = useDashboardData(activeTab);
   const descriptivePulse = useMemo(() => buildSnapshotPulse(dashboard.snapshot), [dashboard.snapshot]);
   const latestDescriptivePulse = descriptivePulse[descriptivePulse.length - 1] ?? null;
-  const currentDescriptivePulse = descriptiveReplayFrame.point ?? latestDescriptivePulse;
-  const currentDescriptivePulseDateLabel =
-    descriptiveReplayFrame.dateLabel ??
-    (latestDescriptivePulse ? formatPulseDateLabel(latestDescriptivePulse.event_date) : null);
-  const descriptiveContextMonthLabel = useMemo(
-    () => formatMonthLabel(dashboard.snapshot?.meta.context_month ?? dashboard.snapshot?.meta.month),
-    [dashboard.snapshot?.meta.context_month, dashboard.snapshot?.meta.month],
-  );
-  const descriptiveUsesPreExpiryContext =
-    dashboard.snapshot?.meta.series_mode === "pre_expiry_context" &&
-    !!dashboard.snapshot?.meta.context_month &&
-    dashboard.snapshot.meta.context_month !== dashboard.snapshot.meta.month;
 
   useEffect(() => {
     setDescriptiveReplayFrame({
@@ -97,48 +83,6 @@ export default function Index() {
       return frame;
     });
   }, []);
-
-  const heroCards = useMemo(
-    () => [
-      {
-        label: "Tỷ lệ rời bỏ thực tế",
-        value: dashboard.snapshot ? formatPct(dashboard.snapshot.metrics.historical_churn_rate) : "-",
-        note: dashboard.snapshot
-          ? `${formatNumber(dashboard.snapshot.metrics.total_expiring_users)} khách sắp hết hạn trong nhóm đang xem`
-          : "Đang chờ dữ liệu tổng quan",
-      },
-      {
-        label: "Khách cần giữ ngay",
-        value: currentDescriptivePulse ? formatNumber(Number(currentDescriptivePulse.high_risk_users ?? 0)) : "-",
-        note: currentDescriptivePulseDateLabel
-          ? descriptiveUsesPreExpiryContext
-            ? `${currentDescriptivePulseDateLabel} • bối cảnh ${descriptiveContextMonthLabel} cho cohort ${formatMonthLabel(dashboard.snapshot?.meta.month)}`
-            : `${currentDescriptivePulseDateLabel} • cập nhật theo nhịp trong tháng`
-          : "Đang chờ chuỗi dữ liệu nguy cơ",
-      },
-      {
-        label: "Doanh thu có nguy cơ mất",
-        value: dashboard.tab2Data ? formatCompactCurrency(dashboard.tab2Data.kpis.predicted_revenue_at_risk) : "-",
-        note: dashboard.tab2Data ? dashboard.tab2Data.kpis.top_segment : "Đang chờ dữ liệu dự báo",
-      },
-      {
-        label: "Giá trị ròng của kịch bản",
-        value: dashboard.tab3Data ? formatCompactCurrency(dashboard.tab3Data.kpis.net_value_after_cost ?? 0) : "-",
-        note: dashboard.tab3Data?.monte_carlo?.enabled
-          ? `${formatPct((dashboard.tab3Data.monte_carlo.probability_net_positive ?? 0) * 100)} khả năng kịch bản vẫn có lãi`
-          : "Ước tính nhanh theo kịch bản đang chọn",
-      },
-    ],
-    [
-      currentDescriptivePulse,
-      currentDescriptivePulseDateLabel,
-      descriptiveContextMonthLabel,
-      descriptiveUsesPreExpiryContext,
-      dashboard.snapshot,
-      dashboard.tab2Data,
-      dashboard.tab3Data,
-    ],
-  );
 
   const metricCards = useMemo<MetricCardConfig[]>(() => {
     if (activeTab === "descriptive") {
@@ -285,41 +229,7 @@ export default function Index() {
     dashboard.tab1Data,
     dashboard.tab2Data,
     dashboard.tab3Data,
-    currentDescriptivePulse,
-    currentDescriptivePulseDateLabel,
   ]);
-
-  const focusCard = useMemo(() => {
-    if (activeTab === "descriptive") {
-      return {
-        title: "Điểm cần nhìn ngay",
-        value: dashboard.currentFilterLabel,
-        note: `Đang chia nhóm theo ${DIMENSION_LABELS[dashboard.tab1Dimension]}`,
-      };
-    }
-
-    if (activeTab === "predictive") {
-      return {
-        title: "Nhóm dễ mất doanh thu nhất",
-        value: dashboard.tab2Data?.kpis.top_segment ?? "-",
-        note: dashboard.tab2Data
-          ? `${formatCurrency(dashboard.tab2Data.kpis.top_segment_risk)} doanh thu rủi ro trên ${formatNumber(dashboard.tab2Data.kpis.top_segment_user_count)} khách`
-          : "Đang chờ dữ liệu dự báo",
-      };
-    }
-
-    return {
-      title: "Mức tự tin của kịch bản",
-      value: dashboard.tab3Data?.monte_carlo?.enabled
-        ? formatPct((dashboard.tab3Data.monte_carlo.probability_scenario_beats_baseline ?? 0) * 100)
-        : dashboard.tab3Data
-          ? formatCurrency(dashboard.tab3Data.kpis.net_value_after_cost ?? 0)
-          : "-",
-      note: dashboard.tab3Data?.monte_carlo?.enabled
-        ? ""
-        : "Ước tính nhanh khi chưa dùng mô phỏng nhiều lần",
-    };
-  }, [activeTab, dashboard.currentFilterLabel, dashboard.tab1Dimension, dashboard.tab2Data, dashboard.tab3Data]);
 
   const predictiveStandby = !dashboard.tab2Loading && !dashboard.tab2HasData && !dashboard.tab2Error;
   const prescriptiveStandby = !dashboard.tab3Loading && !dashboard.tab3HasData && !dashboard.tab3Error;
@@ -430,7 +340,6 @@ export default function Index() {
     ],
   );
 
-  const activeCopy = DASHBOARD_COPY[activeTab];
   const isRefreshing =
     dashboard.tab1Loading || dashboard.tab2Loading || dashboard.tab3Loading || dashboard.wsStatus === "connecting";
 
@@ -492,26 +401,6 @@ export default function Index() {
               <DescriptivePulsePanel onReplayFrameChange={handleDescriptiveReplayFrameChange} snapshot={dashboard.snapshot} />
             ) : activeTab === "prescriptive" ? (
               <>
-                <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_360px]">
-                  <div className="rounded-[30px] border border-white/70 bg-white/88 p-5 shadow-[0_20px_48px_-34px_rgba(15,23,42,0.34)] backdrop-blur">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">{activeCopy.kicker}</p>
-                    <h2 className="mt-3 font-display text-[2rem] font-semibold tracking-[-0.05em] text-slate-950">{activeCopy.title}</h2>
-                    <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-600">{activeCopy.description}</p>
-                    <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                      {heroCards.map((card) => (
-                        <OverviewCard key={card.label} label={card.label} value={card.value} note={card.note} />
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rounded-[30px] border border-cyan-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(236,254,255,0.9))] p-5 shadow-[0_20px_48px_-34px_rgba(8,145,178,0.28)]">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">Trọng tâm hiện tại</p>
-                    <h3 className="mt-3 font-display text-xl font-semibold tracking-[-0.05em] text-slate-950">{focusCard.title}</h3>
-                    <p className="mt-5 font-display text-[2.3rem] font-semibold tracking-[-0.07em] text-slate-950">{focusCard.value}</p>
-                    <p className="mt-3 text-sm leading-7 text-slate-600">{focusCard.note}</p>
-                  </div>
-                </section>
-
                 <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
                   {metricCards.map((card) => (
                     <KPICard
@@ -575,16 +464,6 @@ export default function Index() {
           </main>
         </div>
       </div>
-    </div>
-  );
-}
-
-function OverviewCard({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/72 px-4 py-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className="mt-2 font-display text-[1.55rem] font-semibold tracking-[-0.05em] text-slate-950">{value}</p>
-      <p className="mt-1.5 text-sm leading-6 text-slate-600">{note}</p>
     </div>
   );
 }
