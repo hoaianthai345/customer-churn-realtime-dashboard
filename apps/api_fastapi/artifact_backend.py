@@ -561,7 +561,11 @@ def _parquet_columns(path_text: str) -> tuple[str, ...]:
 
 
 @lru_cache(maxsize=64)
-def _read_parquet_cached(path_text: str, columns: tuple[str, ...] | None = None) -> pd.DataFrame:
+def _read_parquet_cached(
+    path_text: str,
+    file_stamp: tuple[int, int],
+    columns: tuple[str, ...] | None = None,
+) -> pd.DataFrame:
     kwargs: dict[str, Any] = {}
     if columns:
         kwargs["columns"] = list(columns)
@@ -570,31 +574,39 @@ def _read_parquet_cached(path_text: str, columns: tuple[str, ...] | None = None)
 
 def read_parquet_copy(path: str | Path, columns: Iterable[str] | None = None) -> pd.DataFrame:
     resolved = str(Path(path).resolve())
+    stats = Path(resolved).stat()
+    file_stamp = (stats.st_mtime_ns, stats.st_size)
     selected_columns: tuple[str, ...] | None = None
     if columns is not None:
         available = set(_parquet_columns(resolved))
         selected_columns = tuple(column for column in columns if column in available)
         if not selected_columns:
             raise ValueError(f"Khong tim thay cot nao trong parquet: {resolved}")
-    return _read_parquet_cached(resolved, selected_columns).copy()
+    return _read_parquet_cached(resolved, file_stamp, selected_columns).copy()
 
 
 @lru_cache(maxsize=32)
-def _read_json_cached(path_text: str) -> dict[str, Any]:
+def _read_json_cached(path_text: str, file_stamp: tuple[int, int]) -> dict[str, Any]:
     return json.loads(Path(path_text).read_text(encoding="utf-8"))
 
 
 def read_json_copy(path: str | Path) -> dict[str, Any]:
-    return deepcopy(_read_json_cached(str(Path(path).resolve())))
+    resolved = str(Path(path).resolve())
+    stats = Path(resolved).stat()
+    file_stamp = (stats.st_mtime_ns, stats.st_size)
+    return deepcopy(_read_json_cached(resolved, file_stamp))
 
 
 @lru_cache(maxsize=16)
-def _read_csv_cached(path_text: str) -> pd.DataFrame:
+def _read_csv_cached(path_text: str, file_stamp: tuple[int, int]) -> pd.DataFrame:
     return pd.read_csv(path_text)
 
 
 def read_csv_copy(path: str | Path) -> pd.DataFrame:
-    return _read_csv_cached(str(Path(path).resolve())).copy()
+    resolved = str(Path(path).resolve())
+    stats = Path(resolved).stat()
+    file_stamp = (stats.st_mtime_ns, stats.st_size)
+    return _read_csv_cached(resolved, file_stamp).copy()
 
 
 def month_start_to_yyyymm(month_start: date) -> int:

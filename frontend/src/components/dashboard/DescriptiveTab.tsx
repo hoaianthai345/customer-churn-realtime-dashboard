@@ -761,10 +761,10 @@ function DescriptiveTab({
         </ChartCard>
       </div>
 
-      <div className={hidePulsePanel ? "grid gap-4 md:grid-cols-3" : "grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_320px] 2xl:grid-cols-[minmax(0,1.15fr)_360px]"}>
+      <div className={hidePulsePanel ? "grid gap-4" : "grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_320px] 2xl:grid-cols-[minmax(0,1.15fr)_360px]"}>
         {!hidePulsePanel ? <DescriptivePulsePanel onReplayFrameChange={onReplayFrameChange} snapshot={snapshot} /> : null}
 
-        <div className={hidePulsePanel ? "grid gap-4 md:grid-cols-3" : "grid gap-4 self-start"}>
+        <div className={hidePulsePanel ? "grid gap-4 md:grid-cols-3 w-full" : "grid gap-4 self-start"}>
           <InsightCard
             type="warning"
             title="Điều gì đang nổi lên?"
